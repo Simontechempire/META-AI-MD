@@ -1,4 +1,4 @@
-// index.js - META AI MD - NO LOOP, FAST LINK
+// index.js - META AI MD - NO LOOP, FAST LINK, NO UNDEFINED SPAM
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -50,7 +50,7 @@ function loadPlugins(){
 }
 loadPlugins();
 
-// ===== EXPRESS - OUTSIDE start() SO E NO DUPLICATE =====
+// ===== EXPRESS - OUTSIDE start() =====
 app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size }));
 app.get('/pair', async (req,res)=>{
   try{
@@ -58,7 +58,6 @@ app.get('/pair', async (req,res)=>{
     if(!number || number.length < 9) return res.json({ error: 'Invalid number' });
     if(!sock) return res.json({ error: 'Bot starting, wait 5s and try again' });
     if(sock.user) return res.json({ error: 'Already connected' });
-    // NO DELAY - try immediately, retry once if WhatsApp say wait
     try {
       let code = await sock.requestPairingCode(number);
       return res.json({ code });
@@ -88,26 +87,29 @@ async function start(){
       auth: state,
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: true,
-      // FASTER CONNECT - no long timeout
       connectTimeoutMs: 30000,
       keepAliveIntervalMs: 15000,
     });
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (u) => {
-      const { connection, lastDisconnect } = u;
+      const { connection, lastDisconnect, qr } = u;
+      // FIX: Ignore empty updates - na QR / sync update, no be disconnect
+      // This stops "Connection: undefined" spam
+      if(!connection) {
+        if(qr) console.log('QR received - use pairing code instead');
+        return;
+      }
       console.log('Connection:', connection);
       if(connection === 'close'){
         isStarting = false;
         let code = lastDisconnect?.error?.output?.statusCode;
         let reason = lastDisconnect?.error?.output?.payload?.message || lastDisconnect?.error?.message || '';
         console.log('Closed:', code, reason);
-        // 401 = logged out, no reconnect. 515 / others = reconnect ONCE after 3s
         if(code === DisconnectReason.loggedOut){
           console.log('Logged out - delete Meta folder and pair again');
           return;
         }
-        // STOP INFINITE LOOP - only 1 reconnect timer
         if(!reconnectTimer){
           console.log('Reconnecting in 3s...');
           reconnectTimer = setTimeout(()=>{ reconnectTimer = null; start(); }, 3000);
