@@ -1,4 +1,4 @@
-// index.js - META AI MD by Simon Tech - FULL FIXED
+// index.js - META AI MD by Simon Tech - PLUGINS FOLDER FIXED
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -15,14 +15,19 @@ const PORT = config.port || 10000;
 let sock = null;
 let db = F.loadDB();
 
-// ===== LOAD PLUGINS - FIXED =====
+// ===== LOAD PLUGINS - USES plugins/ FOLDER =====
 let commands = new Map();
 function loadPlugins(){
   commands.clear();
-  let dir = path.join(__dirname, 'commands');
-  if(!fs.existsSync(dir)) { console.log('❌ NO commands folder!'); fs.mkdirSync(dir, { recursive: true }); return; }
+  let dir = path.join(__dirname, 'plugins');
+  if(!fs.existsSync(dir)) {
+    console.log('❌ NO plugins folder! Creating am...');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'test.js'), `module.exports = [{ name: 'testping', run: async ({reply}) => reply('✅ Loader dey work!') }];`);
+    console.log('✅ Created plugins/test.js');
+  }
   let files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
-  console.log('📁 Found files:', files);
+  console.log('📁 Found files in plugins/:', files);
   for(let file of files){
     try{
       let full = path.join(dir, file);
@@ -70,7 +75,7 @@ async function start(){
     }
     if(connection === 'open'){
       console.log('META AI MD CONNECTED ✅');
-      try{ const autoMod = require('./commands/auto.js'); if(autoMod.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){ console.log('AutoBio err', e.message); }
+      try{ const autoMod = require('./plugins/auto.js'); if(autoMod.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){ console.log('AutoBio err', e.message); }
     }
   });
 
@@ -93,7 +98,7 @@ async function start(){
   sock.ev.on('messages.upsert', async ({ messages }) => {
     try {
       if (messages[0]?.key?.remoteJid === 'status@broadcast') {
-        const autoMod = require('./commands/auto.js');
+        const autoMod = require('./plugins/auto.js');
         if (autoMod.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
       }
     } catch(e){}
@@ -140,31 +145,28 @@ async function start(){
     let isGroup = F.isGroup(from);
     let isOwner = F.isOwner(sender, db);
 
-    // 1. BANNED
     if (db.banned?.includes(senderNum) && !isOwner) return;
 
-    // 2. MUTE
     if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
       try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
       return;
     }
 
-    // 3. ANTI ENGINE
+    // ANTI ENGINE - plugins/anti.js
     try {
-      const antiMod = require('./commands/anti.js');
+      const antiMod = require('./plugins/anti.js');
       if (antiMod.handleAnti) {
         let blocked = await antiMod.handleAnti(sock, m, db, F);
         if (blocked) { F.saveDB(db); return; }
       }
-    } catch(e){ console.log('Anti err', e.message); }
+    } catch(e){}
 
-    // 4. AUTO ENGINE
+    // AUTO ENGINE - plugins/auto.js
     try {
-      const autoMod = require('./commands/auto.js');
+      const autoMod = require('./plugins/auto.js');
       if (autoMod.handleAuto) await autoMod.handleAuto(sock, m, db);
-    } catch(e){ console.log('Auto err', e.message); }
+    } catch(e){}
 
-    // 5. AUTO FORWARD
     if (db.auto?.autoforward && !isOwner) {
       try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
     }
