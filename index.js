@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const pino = require('pino');
 const config = require('./config');
-const qrcode = require('qrcode-terminal');
+// PAIRING ONLY - No QR Code, No qrcode-terminal - META AI MD by Simon Tech
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
