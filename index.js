@@ -346,7 +346,7 @@ async function start(){
         return editToDone(sent, panel(cmd.toUpperCase(),`𝐎𝐰𝐧𝐞𝐫 𝐜𝐨𝐦𝐦𝐚𝐧𝐝 𝐞𝐱𝐞𝐜𝐮𝐭𝐞𝐝 💀 : ${text||'ok'}`));
       }
 
-      // ===== FALLBACK FOR ANY REMAINING OF 300 =====
+            // ===== FALLBACK =====
       return editToDone(sent, panel(cmd.toUpperCase(),`𝐂𝐨𝐦𝐦𝐚𝐧𝐝: .${cmd} ${text}\n𝐑𝐞𝐚𝐥 𝐫𝐞𝐬𝐩𝐨𝐧𝐬𝐞 𝐫𝐞𝐚𝐝𝐲 💀\n𝐓𝐫𝐲: .menu 𝐟𝐨𝐫 𝐚𝐥𝐥 300`));
 
     }catch(e){
