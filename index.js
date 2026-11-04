@@ -1,4 +1,4 @@
-// index.js - META AI MD - NO LOOP, FAST LINK, NO UNDEFINED SPAM
+// index.js - META AI MD - FIXED Bad MAC + SELF-REPLY
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -50,7 +50,7 @@ function loadPlugins(){
 }
 loadPlugins();
 
-// ===== EXPRESS - OUTSIDE start() =====
+// ===== EXPRESS =====
 app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size }));
 app.get('/pair', async (req,res)=>{
   try{
@@ -81,21 +81,25 @@ async function start(){
     const { version } = await fetchLatestBaileysVersion();
     sock = makeWASocket({
       version,
-      logger: pino({ level: 'silent' }),
+      // FIX Bad MAC spam - hide libsignal errors, only show real errors
+      logger: pino({ level: 'error' }),
       printQRInTerminal: false,
       browser: Browsers.macOS('Safari'),
       auth: state,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       generateHighQualityLinkPreview: true,
       connectTimeoutMs: 30000,
       keepAliveIntervalMs: 15000,
+      // FIX Bad MAC - no sync old history, no retry old messages
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      msgRetryCounterCache: new Map(),
+      getMessage: async () => undefined,
     });
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (u) => {
       const { connection, lastDisconnect, qr } = u;
-      // FIX: Ignore empty updates - na QR / sync update, no be disconnect
-      // This stops "Connection: undefined" spam
       if(!connection) {
         if(qr) console.log('QR received - use pairing code instead');
         return;
@@ -110,6 +114,7 @@ async function start(){
           console.log('Logged out - delete Meta folder and pair again');
           return;
         }
+        // 515 = normal WhatsApp restart, no be error
         if(!reconnectTimer){
           console.log('Reconnecting in 3s...');
           reconnectTimer = setTimeout(()=>{ reconnectTimer = null; start(); }, 3000);
@@ -159,29 +164,51 @@ async function start(){
       } catch(e){}
     });
 
-    // MESSAGE
+    // MESSAGE - FIXED SELF-REPLY
     sock.ev.on('messages.upsert', async ({ messages }) => {
       let m = messages[0];
-      if(!m?.message || m.key.fromMe) return;
+      if(!m?.message) return;
       if (m.key.remoteJid === 'status@broadcast') return;
+
       let from = m.key.remoteJid;
       let sender = m.key.participant || m.key.remoteJid;
       let senderNum = sender.split('@')[0];
       let pushname = m.pushName || 'User';
       let body = F.getText(m);
       if(!body) return;
+
+      // DEBUG - you go see this for logs when message enter
+      console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
+
       let isGroup = F.isGroup(from);
       let isOwner = F.isOwner(sender, db);
+
+      // FIX: Allow owner self-test
+      // If message na fromMe (you send to yourself / bot number) AND e get prefix, treat as owner command
+      // If message na fromMe but no prefix, ignore - na bot own reply, avoid loop
+      let isSelfCommand = false;
+      if(m.key.fromMe){
+        let hasPrefix = config.prefixes.some(p => body.startsWith(p));
+        if(!hasPrefix) return; // bot own reply / normal chat, ignore
+        isSelfCommand = true;
+        isOwner = true; // you be owner
+        console.log('✅ Self-command detected, treating as owner');
+      }
+
       if (db.banned?.includes(senderNum) && !isOwner) return;
       if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
         try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
         return;
       }
-      try { const antiMod = require('./plugins/anti.js'); if (antiMod.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); return; } } } catch(e){}
-      try { const autoMod = require('./plugins/auto.js'); if (autoMod.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
-      if (db.auto?.autoforward && !isOwner) {
-        try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
+      // Skip anti/auto for self-commands to avoid loop
+      if(!isSelfCommand){
+        try { const antiMod = require('./plugins/anti.js'); if (antiMod.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); return; } } } catch(e){}
+        try { const autoMod = require('./plugins/auto.js'); if (autoMod.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
+        if (db.auto?.autoforward && !isOwner) {
+          try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
+        }
       }
+
       let usedPrefix = config.prefixes.find(p => body.startsWith(p));
       if(!usedPrefix) return;
       let args = body.slice(usedPrefix.length).trim().split(/ +/);
