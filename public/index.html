@@ -1,109 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>META AI MD - Pair WhatsApp</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>META AI MD | Pairing</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#0b0f14;color:#fff;font-family:Arial, sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-  .card{background:#111a22;width:100%;max-width:420px;padding:28px 22px;border-radius:22px;border:1px solid #1f2d3a;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.5)}
-  .logo{width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid #25D366}
-  h1{font-size:26px;margin:12px 0 4px;letter-spacing:1px}
-  h1 span{color:#25D366}
-  .sub{color:#8aa0b0;font-size:13px;margin-bottom:20px}
-  .badge{display:inline-block;background:#1a2e22;color:#25D366;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:bold;margin-bottom:16px}
-  label{display:block;text-align:left;font-size:13px;color:#aaa;margin-bottom:6px}
-  input{width:100%;padding:15px;border-radius:13px;border:1px solid #2a3b4a;background:#0b0f14;color:#fff;font-size:18px;outline:none}
-  input:focus{border-color:#25D366}
-  button{width:100%;padding:15px;border:0;border-radius:13px;background:#25D366;color:#000;font-weight:900;font-size:17px;margin-top:14px;cursor:pointer}
-  button:disabled{opacity:.6}
-  .codebox{display:none;margin-top:18px;background:#0b0f14;border:1px dashed #25D366;padding:18px;border-radius:14px}
-  .codebox p{font-size:13px;color:#aaa}
-  .code{font-size:38px;letter-spacing:10px;color:#25D366;font-weight:900;margin:8px 0}
-  .copy{background:#222;color:#fff;padding:8px 14px;border:0;border-radius:20px;cursor:pointer}
-  .steps{text-align:left;background:#0e151c;padding:14px;border-radius:14px;margin-top:18px;font-size:13px;line-height:1.7;color:#b0c0cd}
-  .steps b{color:#fff}
-  #status{margin-top:14px;font-size:13px}
-  .ok{color:#25D366} .wait{color:#ffaa00} .err{color:#ff5555}
-  .footer{margin-top:18px;font-size:11px;color:#666}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Poppins',sans-serif}
+body{background:#030014;color:#fff;overflow-x:hidden;min-height:100vh}
+.bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(circle at 20% 20%,#6d28d9 0%,transparent 40%),radial-gradient(circle at 80% 10%,#00e5ff 0%,transparent 40%),radial-gradient(circle at 50% 90%,#ff00aa 0%,transparent 45%),#030014}
+.bg:before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);background-size:45px 45px}
+.orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:.7;animation:float 6s ease-in-out infinite}
+.o1{width:280px;height:280px;background:#7c3aed;top:-60px;left:-60px}
+.o2{width:320px;height:320px;background:#00e5ff;top:20%;right:-100px;animation-delay:1s}
+.o3{width:260px;height:260px;background:#ff0080;bottom:-80px;left:35%;animation-delay:2s}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-25px)}}
+.wrap{max-width:1150px;margin:0 auto;padding:22px 16px 40px}
+.top{display:flex;justify-content:space-between;align-items:center}
+.logo{display:flex;gap:12px;align-items:center}
+.logo-img{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#7c3aed,#00e5ff,#ff00aa);display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 0 30px #7c3aed;animation:float 4s infinite}
+.logo b{font-family:'Orbitron';font-size:19px;letter-spacing:1px;line-height:1}
+.logo span{font-size:11px;color:#c4b5fd;letter-spacing:2px}
+.live{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:8px 14px;border-radius:100px;font-size:12px;font-weight:700}
+.dot{width:10px;height:10px;background:#22c55e;border-radius:50%;box-shadow:0 0 12px #22c55e;animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.3}}
+.hero{text-align:center;margin:28px 0 22px}
+.badge{display:inline-block;background:linear-gradient(90deg,#7c3aed,#00e5ff);padding:7px 16px;border-radius:100px;font-size:12px;font-weight:800;letter-spacing:1.5px}
+.hero h1{font-family:'Orbitron';font-size:clamp(38px,8vw,72px);line-height:.95;margin:16px 0 10px;background:linear-gradient(90deg,#fff,#00e5ff,#ff00aa,#a78bfa,#fff);background-size:300% 100%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:shine 4s linear infinite}
+@keyframes shine{to{background-position:300% 0}}
+.hero p{color:#cbd5e1;font-size:15px;max-width:600px;margin:0 auto;line-height:1.6}
+.hero p b{color:#fff}
+.grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;margin-top:22px}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:28px;padding:22px;backdrop-filter:blur(18px);box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.card h2{font-family:'Orbitron';font-size:18px;margin-bottom:6px}
+.card h2 i{font-style:normal}
+.sub{font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:16px}
+label{font-size:12px;font-weight:700;letter-spacing:1px;color:#e2e8f0}
+.input-box{display:flex;gap:10px;margin-top:8px;background:#0a0620;border:2px solid #334155;border-radius:16px;padding:6px 6px 6px 16px;align-items:center}
+.input-box:focus-within{border-color:#00e5ff;box-shadow:0 0 0 4px rgba(0,229,255,.2)}
+.flag{font-size:22px}
+input{flex:1;background:transparent;border:0;outline:0;color:#fff;font-size:17px;font-weight:700;padding:12px 0}
+input::placeholder{color:#64748b;font-weight:400}
+.btn{width:100%;margin-top:14px;border:0;padding:16px;border-radius:16px;font-size:16px;font-weight:800;cursor:pointer;color:#fff;background:linear-gradient(90deg,#7c3aed,#db2777,#00e5ff);background-size:200% 100%;transition:.3s;box-shadow:0 10px 30px rgba(124,58,237,.5)}
+.btn:hover{transform:translateY(-2px);background-position:100% 0}
+.btn:disabled{opacity:.6}
+.hint{text-align:center;font-size:12px;color:#94a3b8;margin-top:10px}
+.code-box{display:none;margin-top:16px;background:#020617;border:1px dashed #00e5ff;border-radius:18px;padding:18px;text-align:center}
+.code-box.show{display:block;animation:pop .4s}
+@keyframes pop{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
+.code-box small{color:#94a3b8;letter-spacing:2px;font-size:11px}
+.code{font-family:'Orbitron';font-size:38px;letter-spacing:8px;margin:10px 0;color:#00e5ff;text-shadow:0 0 20px #00e5ff}
+.copy{padding:10px 22px;border-radius:100px;border:0;background:#fff;color:#111;font-weight:800;cursor:pointer}
+.steps{margin-top:16px;display:grid;gap:10px}
+.step{display:flex;gap:12px;background:rgba(255,255,255,.06);border-radius:16px;padding:12px;align-items:center}
+.num{width:36px;height:36px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#00e5ff);display:flex;align-items:center;justify-content:center;font-weight:900}
+.step b{font-size:13px}
+.step span{font-size:12px;color:#cbd5e1;display:block}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.stat{background:#0a0620;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:14px;text-align:center}
+.stat h3{font-family:'Orbitron';font-size:22px;color:#00e5ff}
+.stat p{font-size:11px;color:#94a3b8;letter-spacing:1px}
+.features{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.feat{background:rgba(255,255,255,.06);border-radius:16px;padding:13px}
+.feat span{font-size:22px}
+.feat b{font-size:13px;display:block;margin:4px 0 2px}
+.feat p{font-size:11px;color:#94a3b8;line-height:1.4}
+.owner{display:flex;gap:14px;align-items:center;margin-top:16px;background:linear-gradient(90deg,#1e1b4b,#0e7490);border-radius:18px;padding:14px}
+.owner img{width:56px;height:56px;border-radius:50%;border:3px solid #fff;object-fit:cover}
+.owner b{font-size:14px}
+.owner p{font-size:12px;color:#cbd5e1}
+.owner a{color:#00e5ff;text-decoration:none;font-weight:700}
+.footer{text-align:center;margin-top:28px;color:#94a3b8;font-size:12px;line-height:1.7}
+.footer b{color:#fff}
+.marquee{margin-top:18px;overflow:hidden;white-space:nowrap;border-top:1px solid rgba(255,255,255,.1);border-bottom:1px solid rgba(255,255,255,.1);padding:10px 0;color:#a78bfa;font-weight:700;font-size:13px}
+.marquee span{display:inline-block;animation:scroll 18s linear infinite}
+@keyframes scroll{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
 </style>
 </head>
 <body>
+<div class="bg"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div></div>
+<div class="wrap">
+<div class="top">
+<div class="logo"><div class="logo-img">🤖</div><div><b>META AI MD</b><br><span>BY SIMON TECH INC</span></div></div>
+<div class="live"><div class="dot"></div><span id="liveText">SERVER ONLINE</span></div>
+</div>
+
+<div class="hero">
+<div class="badge">✨ #1 WHATSAPP BOT IN NIGERIA ✨</div>
+<h1>META AI MD</h1>
+<p>Connect your WhatsApp in <b>10 seconds</b>. No QR code. No stress. Just enter your number, get your pairing code, and your <b>300 commands</b> bot go start to work.</p>
+</div>
+
+<div class="grid">
 <div class="card">
-  <img class="logo" src="https://files.catbox.moe/hhafg3.jpg" alt="META AI MD">
-  <h1>META <span>AI MD</span></h1>
-  <p class="sub">Link your WhatsApp in 30 seconds</p>
-  <div class="badge">● 300 COMMANDS • RENDER • FREE</div>
+<h2>🔗 <i>PAIR YOUR NUMBER</i></h2>
+<p class="sub">Enter your WhatsApp number with country code. Example: <b>2348102350169</b> for Nigeria.</p>
+<label>WHATSAPP NUMBER</label>
+<div class="input-box"><span class="flag">🇳🇬</span><input id="number" type="tel" placeholder="2348102350169" maxlength="15"></div>
+<button class="btn" id="pairBtn" onclick="getCode()">🚀 GET MY PAIRING CODE</button>
+<p class="hint">Bot go send code in less than 5 seconds</p>
+<div class="code-box" id="codeBox">
+<small>YOUR PAIRING CODE</small>
+<div class="code" id="codeText">--------</div>
+<button class="copy" onclick="copyCode()">📋 COPY CODE</button>
+<p class="hint" style="color:#fde68a">Open WhatsApp > Linked Devices > Link with phone number > Paste code</p>
+</div>
+<div class="steps">
+<div class="step"><div class="num">1</div><div><b>Enter Number</b><span>Type number, click GET CODE</span></div></div>
+<div class="step"><div class="num">2</div><div><b>Copy Code</b><span>Copy the 8-digit code above</span></div></div>
+<div class="step"><div class="num">3</div><div><b>Link in WhatsApp</b><span>WhatsApp > Settings > Linked Devices > Link</span></div></div>
+<div class="step"><div class="num">4</div><div><b>Enjoy 300 Cmds</b><span>Type .menu in your DM to start</span></div></div>
+</div>
+</div>
 
-  <label>WhatsApp Number (with country code)</label>
-  <input id="num" type="tel" placeholder="2348102350169" inputmode="numeric">
-  <button id="btn" onclick="pair()">GET PAIRING CODE</button>
+<div>
+<div class="card">
+<div class="stats">
+<div class="stat"><h3>300+</h3><p>COMMANDS</p></div>
+<div class="stat"><h3>24/7</h3><p>ONLINE</p></div>
+<div class="stat"><h3>100%</h3><p>FREE</p></div>
+</div>
+<h2>⚡ WHY META AI MD?</h2>
+<div class="features">
+<div class="feat"><span>🤖</span><b>AI Chat</b><p>ChatGPT, Gemini, Meta AI, DeepSeek inside WhatsApp</p></div>
+<div class="feat"><span>⬇️</span><b>Downloader</b><p>TikTok, IG, YouTube, Facebook, Spotify</p></div>
+<div class="feat"><span>👑</span><b>Group Control</b><p>Kick, promote, antilink, welcome, tagall</p></div>
+<div class="feat"><span>🎨</span><b>Sticker Maker</b><p>Sticker, QC, Brat, Attp, Meme</p></div>
+<div class="feat"><span>👁️</span><b>View Once</b><p>Save VV image, video, audio</p></div>
+<div class="feat"><span>🛡️</span><b>Anti System</b><p>Anti-link, Anti-badword, Anti-spam</p></div>
+</div>
+<div class="owner">
+<img src="https://files.catbox.moe/hhafg3.jpg" onerror="this.src='https://ui-avatars.com/api/?name=Simon+Tech&background=7c3aed&color=fff'">
+<div><b>Simon Tech - Owner</b><p>CEO, Simon Tech Inc<br>WhatsApp: <a href="https://wa.me/2348102350169">+234 810 235 0169</a><br>Lagos, Nigeria 🇳🇬</p></div>
+</div>
+</div>
+</div>
+</div>
 
-  <div class="codebox" id="codebox">
-    <p>YOUR 8-DIGIT PAIRING CODE:</p>
-    <div class="code" id="code">--------</div>
-    <button class="copy" onclick="copyCode()">Copy Code</button>
-    <p style="margin-top:10px">Code go expire in 60 seconds. Generate again if e expire.</p>
-  </div>
+<div class="marquee"><span>🚀 META AI MD • 300 COMMANDS • AI • DOWNLOADER • GROUP • STICKER • VV • ANTI-LINK • BY SIMON TECH • LAGOS NIGERIA •&nbsp;&nbsp;&nbsp;🚀 META AI MD • 300 COMMANDS • AI • DOWNLOADER • GROUP • STICKER • VV • ANTI-LINK • BY SIMON TECH • LAGOS NIGERIA •</span></div>
 
-  <p id="out"></p>
-
-  <div class="steps">
-    <b>HOW TO LINK:</b><br>
-    1. Open WhatsApp on your phone<br>
-    2. Tap <b>⋮ Menu > Linked Devices</b><br>
-    3. Tap <b>Link a Device</b><br>
-    4. Tap <b>Link with phone number instead</b><br>
-    5. Enter the 8-digit code above
-  </div>
-
-  <p id="status" class="wait">⌛ Checking bot status...</p>
-  <p class="footer">©️ created by Simon tech inc • META AI MD POWER BY SIMON TECH</p>
+<div class="footer">
+<b>©️ 2026 META AI MD - Created by Simon Tech Inc</b><br>
+Prefix: . ! ? @ - / &nbsp;|&nbsp; Hosting: Render &nbsp;|&nbsp; Timezone: Africa/Lagos<br>
+Made with ❤️ in Lagos, Nigeria
+</div>
 </div>
 
 <script>
-let currentCode = '';
-async function pair(){
-  let n = document.getElementById('num').value.trim().replace(/[^0-9]/g,'');
-  let out = document.getElementById('out');
-  let btn = document.getElementById('btn');
-  if(!n || n.length < 9){ out.innerHTML='<span class="err">❌ Enter valid number e.g 2348102350169</span>'; return; }
-  btn.disabled = true; btn.innerText = 'GENERATING...';
-  out.innerHTML = '⏳ Generating your code...';
+async function getCode(){
+  let num = document.getElementById('number').value.replace(/[^0-9]/g,'');
+  let btn = document.getElementById('pairBtn');
+  if(!num || num.length < 9){ alert('Enter correct number e.g 2348102350169'); return; }
+  btn.disabled = true; btn.innerText = '⏳ GENERATING CODE...';
   try{
-    let r = await fetch('/pair?number='+n);
-    let j = await r.json();
-    if(j.code){
-      currentCode = j.code;
-      document.getElementById('codebox').style.display='block';
-      document.getElementById('code').innerText = j.code;
-      out.innerHTML = '<span class="ok">✅ Code generated! Enter am for WhatsApp now.</span>';
-    } else {
-      out.innerHTML = '<span class="err">❌ '+(j.error||'Try again in 10s')+'</span>';
-    }
-  }catch(e){
-    out.innerHTML = '<span class="err">❌ Server error, try again</span>';
-  }
-  btn.disabled = false; btn.innerText = 'GET PAIRING CODE';
+    let r = await fetch('/pair?number='+num);
+    let d = await r.json();
+    if(d.code){
+      document.getElementById('codeBox').classList.add('show');
+      document.getElementById('codeText').innerText = d.code;
+      document.getElementById('codeBox').scrollIntoView({behavior:'smooth'});
+    } else { alert(d.error || 'Try again in 10s'); }
+  }catch(e){ alert('Server busy, try again'); }
+  btn.disabled = false; btn.innerText = '🚀 GET MY PAIRING CODE';
 }
 function copyCode(){
-  if(!currentCode) return;
-  navigator.clipboard.writeText(currentCode);
-  alert('Copied: '+currentCode);
+  let t = document.getElementById('codeText').innerText;
+  navigator.clipboard.writeText(t);
+  alert('Code copied: '+t);
 }
-async function checkStatus(){
-  try{
-    let r = await fetch('/status');
-    let j = await r.json();
-    document.getElementById('status').innerHTML = j.connected ? '<span class="ok">✅ CONNECTED: '+j.user+'</span>' : '<span class="wait">⌛ Waiting for pairing... Bot is ONLINE</span>';
-  }catch{
-    document.getElementById('status').innerHTML = '<span class="err">❌ Bot offline, wait 10s</span>';
-  }
-}
-setInterval(checkStatus, 3000);
-checkStatus();
-document.getElementById('num').addEventListener('keypress', e=>{ if(e.key==='Enter') pair(); });
+fetch('/status').then(r=>r.json()).then(d=>{
+  if(d.connected) document.getElementById('liveText').innerText = 'BOT CONNECTED ✅';
+}).catch(()=>{});
+document.getElementById('number').addEventListener('keypress', e=>{ if(e.key==='Enter') getCode(); });
 </script>
 </body>
-  </html>
+</html>
