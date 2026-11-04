@@ -348,7 +348,7 @@ async function start(){
       // ===== FALLBACK =====
       return editToDone(sent, panel(cmd.toUpperCase(),`Command: .${cmd} ${text} - Try .menu`));
 
-    }catch(e){
+        }catch(e){
       console.log('CMD ERR', cmd, e);
       try{ await sock.sendMessage(from,{text:panel('ERROR',`Error in .${cmd}: ${e.message}`), edit: sent.key}); }catch{ await reply(panel('ERROR',`Try again`)); }
     }
