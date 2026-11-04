@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>META AI MD - Pair WhatsApp</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b0f14;color:#fff;font-family:Arial, sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:#111a22;width:100%;max-width:420px;padding:28px 22px;border-radius:22px;border:1px solid #1f2d3a;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+  .logo{width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid #25D366}
+  h1{font-size:26px;margin:12px 0 4px;letter-spacing:1px}
+  h1 span{color:#25D366}
+  .sub{color:#8aa0b0;font-size:13px;margin-bottom:20px}
+  .badge{display:inline-block;background:#1a2e22;color:#25D366;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:bold;margin-bottom:16px}
+  label{display:block;text-align:left;font-size:13px;color:#aaa;margin-bottom:6px}
+  input{width:100%;padding:15px;border-radius:13px;border:1px solid #2a3b4a;background:#0b0f14;color:#fff;font-size:18px;outline:none}
+  input:focus{border-color:#25D366}
+  button{width:100%;padding:15px;border:0;border-radius:13px;background:#25D366;color:#000;font-weight:900;font-size:17px;margin-top:14px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .codebox{display:none;margin-top:18px;background:#0b0f14;border:1px dashed #25D366;padding:18px;border-radius:14px}
+  .codebox p{font-size:13px;color:#aaa}
+  .code{font-size:38px;letter-spacing:10px;color:#25D366;font-weight:900;margin:8px 0}
+  .copy{background:#222;color:#fff;padding:8px 14px;border:0;border-radius:20px;cursor:pointer}
+  .steps{text-align:left;background:#0e151c;padding:14px;border-radius:14px;margin-top:18px;font-size:13px;line-height:1.7;color:#b0c0cd}
+  .steps b{color:#fff}
+  #status{margin-top:14px;font-size:13px}
+  .ok{color:#25D366} .wait{color:#ffaa00} .err{color:#ff5555}
+  .footer{margin-top:18px;font-size:11px;color:#666}
+</style>
+</head>
+<body>
+<div class="card">
+  <img class="logo" src="https://files.catbox.moe/hhafg3.jpg" alt="META AI MD">
+  <h1>META <span>AI MD</span></h1>
+  <p class="sub">Link your WhatsApp in 30 seconds</p>
+  <div class="badge">● 300 COMMANDS • RENDER • FREE</div>
+
+  <label>WhatsApp Number (with country code)</label>
+  <input id="num" type="tel" placeholder="2348102350169" inputmode="numeric">
+  <button id="btn" onclick="pair()">GET PAIRING CODE</button>
+
+  <div class="codebox" id="codebox">
+    <p>YOUR 8-DIGIT PAIRING CODE:</p>
+    <div class="code" id="code">--------</div>
+    <button class="copy" onclick="copyCode()">Copy Code</button>
+    <p style="margin-top:10px">Code go expire in 60 seconds. Generate again if e expire.</p>
+  </div>
+
+  <p id="out"></p>
+
+  <div class="steps">
+    <b>HOW TO LINK:</b><br>
+    1. Open WhatsApp on your phone<br>
+    2. Tap <b>⋮ Menu > Linked Devices</b><br>
+    3. Tap <b>Link a Device</b><br>
+    4. Tap <b>Link with phone number instead</b><br>
+    5. Enter the 8-digit code above
+  </div>
+
+  <p id="status" class="wait">⌛ Checking bot status...</p>
+  <p class="footer">©️ created by Simon tech inc • META AI MD POWER BY SIMON TECH</p>
+</div>
+
+<script>
+let currentCode = '';
+async function pair(){
+  let n = document.getElementById('num').value.trim().replace(/[^0-9]/g,'');
+  let out = document.getElementById('out');
+  let btn = document.getElementById('btn');
+  if(!n || n.length < 9){ out.innerHTML='<span class="err">❌ Enter valid number e.g 2348102350169</span>'; return; }
+  btn.disabled = true; btn.innerText = 'GENERATING...';
+  out.innerHTML = '⏳ Generating your code...';
+  try{
+    let r = await fetch('/pair?number='+n);
+    let j = await r.json();
+    if(j.code){
+      currentCode = j.code;
+      document.getElementById('codebox').style.display='block';
+      document.getElementById('code').innerText = j.code;
+      out.innerHTML = '<span class="ok">✅ Code generated! Enter am for WhatsApp now.</span>';
+    } else {
+      out.innerHTML = '<span class="err">❌ '+(j.error||'Try again in 10s')+'</span>';
+    }
+  }catch(e){
+    out.innerHTML = '<span class="err">❌ Server error, try again</span>';
+  }
+  btn.disabled = false; btn.innerText = 'GET PAIRING CODE';
+}
+function copyCode(){
+  if(!currentCode) return;
+  navigator.clipboard.writeText(currentCode);
+  alert('Copied: '+currentCode);
+}
+async function checkStatus(){
+  try{
+    let r = await fetch('/status');
+    let j = await r.json();
+    document.getElementById('status').innerHTML = j.connected ? '<span class="ok">✅ CONNECTED: '+j.user+'</span>' : '<span class="wait">⌛ Waiting for pairing... Bot is ONLINE</span>';
+  }catch{
+    document.getElementById('status').innerHTML = '<span class="err">❌ Bot offline, wait 10s</span>';
+  }
+}
+setInterval(checkStatus, 3000);
+checkStatus();
+document.getElementById('num').addEventListener('keypress', e=>{ if(e.key==='Enter') pair(); });
+</script>
+</body>
+  </html>
