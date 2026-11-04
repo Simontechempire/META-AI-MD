@@ -1,4 +1,4 @@
-// index.js - META AI MD Plugin Loader by Simon Tech - CONNECTED EDITION
+// index.js - META AI MD by Simon Tech - FULL FIXED
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -15,28 +15,33 @@ const PORT = config.port || 10000;
 let sock = null;
 let db = F.loadDB();
 
-// ===== LOAD PLUGINS =====
+// ===== LOAD PLUGINS - FIXED =====
 let commands = new Map();
 function loadPlugins(){
   commands.clear();
   let dir = path.join(__dirname, 'commands');
-  if(!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if(!fs.existsSync(dir)) { console.log('❌ NO commands folder!'); fs.mkdirSync(dir, { recursive: true }); return; }
   let files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
+  console.log('📁 Found files:', files);
   for(let file of files){
     try{
       let full = path.join(dir, file);
       delete require.cache[require.resolve(full)];
       let plugin = require(full);
-      let list = Array.isArray(plugin) ? plugin : [plugin];
+      let list = [];
+      if (Array.isArray(plugin)) list = plugin;
+      else if (plugin && Array.isArray(plugin.plugins)) list = plugin.plugins;
+      else if (plugin && plugin.name) list = [plugin];
+      else { console.log('⚠️ No plugins in', file); continue; }
+      let count = 0;
       for(let p of list){
         if(!p || !p.name || typeof p.run !== 'function') continue;
-        // Skip engine exports - they are not plugins
-        if(p.name === 'handleAuto' || p.name === 'handleAnti') continue;
         commands.set(p.name.toLowerCase(), p);
         if(p.aliases) for(let a of p.aliases) commands.set(a.toLowerCase(), p);
+        count++;
       }
-      console.log('Loaded plugin:', file);
-    }catch(e){ console.log('Plugin failed:', file, e.message); }
+      console.log(`✅ Loaded ${file}: ${count} cmds`);
+    }catch(e){ console.log('❌ Plugin failed:', file, e.message); console.log(e.stack); }
   }
   console.log(`Total commands loaded: ${commands.size}`);
 }
@@ -65,7 +70,6 @@ async function start(){
     }
     if(connection === 'open'){
       console.log('META AI MD CONNECTED ✅');
-      // ===== AUTO BIO / ONLINE ENGINE =====
       try{ const autoMod = require('./commands/auto.js'); if(autoMod.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){ console.log('AutoBio err', e.message); }
     }
   });
@@ -85,18 +89,17 @@ async function start(){
   app.get('/', (req,res)=> res.sendFile(path.join(__dirname, 'public', 'index.html')));
   app.listen(PORT, ()=> console.log('Server on '+PORT));
 
-  // ===== STATUS HANDLER - AUTO VIEW / LIKE STATUS =====
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    // STATUS: messages from status@broadcast
-    if (type === 'append' || messages[0]?.key?.remoteJid === 'status@broadcast') {
-      try {
+  // ===== STATUS HANDLER =====
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    try {
+      if (messages[0]?.key?.remoteJid === 'status@broadcast') {
         const autoMod = require('./commands/auto.js');
         if (autoMod.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
-      } catch(e){}
-    }
+      }
+    } catch(e){}
   });
 
-  // ===== GROUP WELCOME / GOODBYE / ANTI PROMOTE / DEMOTE =====
+  // ===== GROUP WELCOME / GOODBYE / ANTI PROMOTE =====
   sock.ev.on('group-participants.update', async (u) => {
     try {
       let from = u.id;
@@ -111,7 +114,6 @@ async function start(){
           let msg = (g.goodbyeMsg || '👋 Bye @user, we go miss you 😢').replace(/@user/g, `@${p.split('@')[0]}`);
           await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
         }
-        // ANTI PROMOTE / DEMOTE
         if (u.action === 'promote' && db.anti?.antipromote) {
           await sock.groupParticipantsUpdate(from, [p], 'demote').catch(()=>{});
           await sock.sendMessage(from, { text: `🚫 Anti-Promote: @${p.split('@')[0]} demoted back`, mentions: [p] }).catch(()=>{});
@@ -128,9 +130,7 @@ async function start(){
   sock.ev.on('messages.upsert', async ({ messages }) => {
     let m = messages[0];
     if(!m?.message || m.key.fromMe) return;
-    // Skip status here - handled above
     if (m.key.remoteJid === 'status@broadcast') return;
-
     let from = m.key.remoteJid;
     let sender = m.key.participant || m.key.remoteJid;
     let senderNum = sender.split('@')[0];
@@ -140,16 +140,16 @@ async function start(){
     let isGroup = F.isGroup(from);
     let isOwner = F.isOwner(sender, db);
 
-    // ===== 1. BANNED CHECK =====
+    // 1. BANNED
     if (db.banned?.includes(senderNum) && !isOwner) return;
 
-    // ===== 2. MUTE CHECK - Moderator .mute =====
+    // 2. MUTE
     if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
       try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
       return;
     }
 
-    // ===== 3. ANTI ENGINE - Delete bad msgs before commands =====
+    // 3. ANTI ENGINE
     try {
       const antiMod = require('./commands/anti.js');
       if (antiMod.handleAnti) {
@@ -158,30 +158,27 @@ async function start(){
       }
     } catch(e){ console.log('Anti err', e.message); }
 
-    // ===== 4. AUTO ENGINE - autoread, autoreact, etc =====
+    // 4. AUTO ENGINE
     try {
       const autoMod = require('./commands/auto.js');
       if (autoMod.handleAuto) await autoMod.handleAuto(sock, m, db);
     } catch(e){ console.log('Auto err', e.message); }
 
-    // ===== 5. AUTO FORWARD TO OWNER =====
+    // 5. AUTO FORWARD
     if (db.auto?.autoforward && !isOwner) {
       try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
     }
 
-    // Find prefix
     let usedPrefix = config.prefixes.find(p => body.startsWith(p));
     if(!usedPrefix) return;
     let args = body.slice(usedPrefix.length).trim().split(/ +/);
     let cmdName = (args.shift()||'').toLowerCase();
     let text = args.join(' ');
 
-    // Mode check
     if(db.settings?.mode === 'private' && !isOwner) return;
 
     const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
 
-    // Built-in menu
     if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
       try{
         let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting });
