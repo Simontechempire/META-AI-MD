@@ -345,13 +345,12 @@ async function start(){
         if(cmd==='block'||cmd==='unblock'){ let t=m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0]; if(!t) return editToDone(sent, panel(cmd.toUpperCase(),`𝐓𝐚𝐠 𝐩𝐞𝐫𝐬𝐨𝐧`)); await sock.updateBlockStatus(t, cmd==='block'?'block':'unblock'); return editToDone(sent, panel(cmd.toUpperCase(),`𝐃𝐨𝐧𝐞 💀`)); }
         return editToDone(sent, panel(cmd.toUpperCase(),`𝐎𝐰𝐧𝐞𝐫 𝐜𝐨𝐦𝐦𝐚𝐧𝐝 𝐞𝐱𝐞𝐜𝐮𝐭𝐞𝐝 💀 : ${text||'ok'}`));
       }
-
-            // ===== FALLBACK =====
-      return editToDone(sent, panel(cmd.toUpperCase(),`𝐂𝐨𝐦𝐦𝐚𝐧𝐝: .${cmd} ${text}\n𝐑𝐞𝐚𝐥 𝐫𝐞𝐬𝐩𝐨𝐧𝐬𝐞 𝐫𝐞𝐚𝐝𝐲 💀\n𝐓𝐫𝐲: .menu 𝐟𝐨𝐫 𝐚𝐥𝐥 300`));
+      // ===== FALLBACK =====
+      return editToDone(sent, panel(cmd.toUpperCase(),`Command: .${cmd} ${text} - Try .menu`));
 
     }catch(e){
       console.log('CMD ERR', cmd, e);
-      try{ await sock.sendMessage(from,{text:panel('𝐄𝐑𝐑𝐎𝐑',`𝐄𝐫𝐫𝐨𝐫 𝐢𝐧 .${cmd}: ${e.message} 💀`), edit: sent.key}); }catch{ await reply(panel('𝐄𝐑𝐑𝐎𝐑',`𝐓𝐫𝐲 𝐚𝐠𝐚𝐢𝐧 💀`)); }
+      try{ await sock.sendMessage(from,{text:panel('ERROR',`Error in .${cmd}: ${e.message}`), edit: sent.key}); }catch{ await reply(panel('ERROR',`Try again`)); }
     }
     await react('💀');
   });
