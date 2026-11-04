@@ -1,0 +1,17 @@
+services:
+    - type: web
+    name: meta-ai-md
+    env: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+            - key: NODE_VERSION
+        value: 20.18.0
+            - key: PORT
+        value: 10000
+            - key: NODE_ENV
+        value: production
+    healthCheckPath: /health
