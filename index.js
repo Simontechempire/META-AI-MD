@@ -1,4 +1,4 @@
-// index.js - META AI MD - FIXED Bad MAC + SELF-REPLY
+// index.js - META AI MD - FIXED Bad MAC + SELF-REPLY + NO OFFLINE + FAST + FANCY
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -16,6 +16,19 @@ let sock = null;
 let db = F.loadDB();
 let isStarting = false;
 let reconnectTimer = null;
+
+// ===== FIX 1: FANCY BOLD FONT =====
+function fancy(text){
+  const map = {a:'𝐚',b:'𝐛',c:'𝐜',d:'𝐝',e:'𝐞',f:'𝐟',g:'𝐠',h:'𝐡',i:'𝐢',j:'𝐣',k:'𝐤',l:'𝐥',m:'𝐦',n:'𝐧',o:'𝐨',p:'𝐩',q:'𝐪',r:'𝐫',s:'𝐬',t:'𝐭',u:'𝐮',v:'𝐯',w:'𝐰',x:'𝐱',y:'𝐲',z:'𝐳',A:'𝐀',B:'𝐁',C:'𝐂',D:'𝐃',E:'𝐄',F:'𝐅',G:'𝐆',H:'𝐇',I:'𝐈',J:'𝐉',K:'𝐊',L:'𝐋',M:'𝐌',N:'𝐍',O:'𝐎',P:'𝐏',Q:'𝐐',R:'𝐑',S:'𝐒',T:'𝐓',U:'𝐔',V:'𝐕',W:'𝐖',X:'𝐗',Y:'𝐘',Z:'𝐙',0:'𝟎',1:'𝟏',2:'𝟐',3:'𝟑',4:'𝟒',5:'𝟓',6:'𝟔',7:'𝟕',8:'𝟖',9:'𝟗'};
+  return String(text).split('').map(c=>map[c]||c).join('');
+}
+F.fancy = fancy;
+F.bold = fancy; // so plugins can use F.fancy()
+
+// ===== FIX 2: CACHE PLUGINS - NO REQUIRE EVERY MESSAGE =====
+let antiMod = null, autoMod = null;
+try{ antiMod = require('./plugins/anti.js'); }catch(e){}
+try{ autoMod = require('./plugins/auto.js'); }catch(e){}
 
 // ===== LOAD PLUGINS =====
 let commands = new Map();
@@ -43,15 +56,19 @@ function loadPlugins(){
         commands.set(p.name.toLowerCase(), p);
         if(p.aliases) for(let a of p.aliases) commands.set(a.toLowerCase(), p);
       }
-      console.log(`✅ Loaded ${file}`);
+      console.log(`✅ Loaded ${file} - ${list.length} cmds`);
     }catch(e){ console.log('❌ Plugin failed:', file, e.message); }
   }
   console.log(`Total commands loaded: ${commands.size}`);
+  // Refresh cached auto/anti after reload
+  try{ antiMod = require('./plugins/anti.js'); }catch(e){}
+  try{ autoMod = require('./plugins/auto.js'); }catch(e){}
 }
 loadPlugins();
 
-// ===== EXPRESS =====
+// ===== EXPRESS + KEEPALIVE =====
 app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size }));
+app.get('/ping', (req,res)=> res.send('pong'));
 app.get('/pair', async (req,res)=>{
   try{
     let number = String(req.query.number||'').replace(/[^0-9]/g,'');
@@ -72,6 +89,15 @@ app.get('/pair', async (req,res)=>{
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, ()=> console.log('Server on '+PORT));
 
+// Self-ping every 4 mins - stops Render sleep
+setInterval(async () => {
+  try{
+    let url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    await fetch(`${url}/ping`).catch(()=>{});
+    console.log('💓 KeepAlive - bot still alive');
+  }catch(e){}
+}, 4 * 60 * 1000);
+
 async function start(){
   if(isStarting) { console.log('Already starting, skip duplicate'); return; }
   isStarting = true;
@@ -81,16 +107,14 @@ async function start(){
     const { version } = await fetchLatestBaileysVersion();
     sock = makeWASocket({
       version,
-      // FIX Bad MAC spam - hide libsignal errors, only show real errors
       logger: pino({ level: 'error' }),
       printQRInTerminal: false,
       browser: Browsers.macOS('Safari'),
       auth: state,
       markOnlineOnConnect: true,
-      generateHighQualityLinkPreview: true,
+      generateHighQualityLinkPreview: false, // FAST - no preview
       connectTimeoutMs: 30000,
-      keepAliveIntervalMs: 15000,
-      // FIX Bad MAC - no sync old history, no retry old messages
+      keepAliveIntervalMs: 10000, // FIX OFFLINE - ping WhatsApp every 10s
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
       msgRetryCounterCache: new Map(),
@@ -114,7 +138,6 @@ async function start(){
           console.log('Logged out - delete Meta folder and pair again');
           return;
         }
-        // 515 = normal WhatsApp restart, no be error
         if(!reconnectTimer){
           console.log('Reconnecting in 3s...');
           reconnectTimer = setTimeout(()=>{ reconnectTimer = null; start(); }, 3000);
@@ -123,21 +146,18 @@ async function start(){
       if(connection === 'open'){
         isStarting = false;
         console.log('META AI MD CONNECTED ✅');
-        try{ const autoMod = require('./plugins/auto.js'); if(autoMod.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){}
+        try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){}
       }
     });
 
-    // STATUS
     sock.ev.on('messages.upsert', async ({ messages }) => {
       try {
         if (messages[0]?.key?.remoteJid === 'status@broadcast') {
-          const autoMod = require('./plugins/auto.js');
-          if (autoMod.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
+          if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
         }
       } catch(e){}
     });
 
-    // GROUP
     sock.ev.on('group-participants.update', async (u) => {
       try {
         let from = u.id;
@@ -164,68 +184,71 @@ async function start(){
       } catch(e){}
     });
 
-    // MESSAGE - FIXED SELF-REPLY
+    // MESSAGE - FIXED: LOOP ALL MESSAGES + FAST
     sock.ev.on('messages.upsert', async ({ messages }) => {
-      let m = messages[0];
-      if(!m?.message) return;
-      if (m.key.remoteJid === 'status@broadcast') return;
-
-      let from = m.key.remoteJid;
-      let sender = m.key.participant || m.key.remoteJid;
-      let senderNum = sender.split('@')[0];
-      let pushname = m.pushName || 'User';
-      let body = F.getText(m);
-      if(!body) return;
-
-      // DEBUG - you go see this for logs when message enter
-      console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
-
-      let isGroup = F.isGroup(from);
-      let isOwner = F.isOwner(sender, db);
-
-      // FIX: Allow owner self-test
-      // If message na fromMe (you send to yourself / bot number) AND e get prefix, treat as owner command
-      // If message na fromMe but no prefix, ignore - na bot own reply, avoid loop
-      let isSelfCommand = false;
-      if(m.key.fromMe){
-        let hasPrefix = config.prefixes.some(p => body.startsWith(p));
-        if(!hasPrefix) return; // bot own reply / normal chat, ignore
-        isSelfCommand = true;
-        isOwner = true; // you be owner
-        console.log('✅ Self-command detected, treating as owner');
-      }
-
-      if (db.banned?.includes(senderNum) && !isOwner) return;
-      if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
-        try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
-        return;
-      }
-      // Skip anti/auto for self-commands to avoid loop
-      if(!isSelfCommand){
-        try { const antiMod = require('./plugins/anti.js'); if (antiMod.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); return; } } } catch(e){}
-        try { const autoMod = require('./plugins/auto.js'); if (autoMod.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
-        if (db.auto?.autoforward && !isOwner) {
-          try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
+      for(let m of messages){ // FIX: was only messages[0] before
+        if(!m?.message) continue;
+        if (m.key.remoteJid === 'status@broadcast') continue;
+        let from = m.key.remoteJid;
+        let sender = m.key.participant || m.key.remoteJid;
+        let senderNum = sender.split('@')[0];
+        let pushname = m.pushName || 'User';
+        let body = F.getText(m);
+        if(!body) continue;
+        console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
+        let isGroup = F.isGroup(from);
+        let isOwner = F.isOwner(sender, db);
+        let isSelfCommand = false;
+        if(m.key.fromMe){
+          let hasPrefix = config.prefixes.some(p => body.startsWith(p));
+          if(!hasPrefix) continue;
+          isSelfCommand = true;
+          isOwner = true;
+          console.log('✅ Self-command detected, treating as owner');
         }
+        if (db.banned?.includes(senderNum) && !isOwner) continue;
+        if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
+          try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
+          continue;
+        }
+        if(!isSelfCommand){
+          try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
+          try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
+          if (db.auto?.autoforward && !isOwner) {
+            try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
+          }
+        }
+        let usedPrefix = config.prefixes.find(p => body.startsWith(p));
+        if(!usedPrefix) continue;
+        let args = body.slice(usedPrefix.length).trim().split(/ +/);
+        let cmdName = (args.shift()||'').toLowerCase();
+        let text = args.join(' ');
+        if(db.settings?.mode === 'private' && !isOwner) continue;
+        // FANCY REPLY - every reply go use fancy bold
+        const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
+        const fancyReply = async (t, opts={}) => sock.sendMessage(from, { text: fancy(t) }, { quoted: m, ...opts });
+        if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
+          try{ let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting }); return await reply(menuText); }catch(e){ return await reply('Menu error: '+e.message); }
+        }
+        if(cmdName === 'reload' && isOwner){ loadPlugins(); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
+        let plugin = commands.get(cmdName);
+        if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
+        if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
+        if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
+        try{
+          // TIMEOUT 10s - one slow cmd no go block bot
+          await Promise.race([
+            plugin.run({ sock, m, from, sender, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply }),
+            new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
+          ]);
+          F.saveDB(db);
+        }catch(e){ console.log('CMD ERR', cmdName, e.message); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
       }
-
-      let usedPrefix = config.prefixes.find(p => body.startsWith(p));
-      if(!usedPrefix) return;
-      let args = body.slice(usedPrefix.length).trim().split(/ +/);
-      let cmdName = (args.shift()||'').toLowerCase();
-      let text = args.join(' ');
-      if(db.settings?.mode === 'private' && !isOwner) return;
-      const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
-      if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
-        try{ let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting }); return await reply(menuText); }catch(e){ return await reply('Menu error: '+e.message); }
-      }
-      if(cmdName === 'reload' && isOwner){ loadPlugins(); return await reply(`Reloaded! Total: ${commands.size} commands`); }
-      let plugin = commands.get(cmdName);
-      if(!plugin) return await reply(`❌ Unknown command: .${cmdName}\nType .menu\n\n${config.footer}`);
-      if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
-      if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
-      try{ await plugin.run({ sock, m, from, sender, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply }); F.saveDB(db); }catch(e){ console.log('CMD ERR', cmdName, e.message); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
     });
   }catch(e){ console.log('Start failed', e.message); isStarting = false; reconnectTimer = setTimeout(()=>{ reconnectTimer=null; start(); }, 3000); }
 }
 start();
+
+// Anti-crash
+process.on('uncaughtException', e=>console.log('Uncaught:', e.message));
+process.on('unhandledRejection', e=>console.log('Rejection:', e.message));
