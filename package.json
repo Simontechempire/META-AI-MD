@@ -1,0 +1,19 @@
+{
+  "name": "meta-ai-md",
+  "version": "1.0.0",
+  "description": "META AI MD - WhatsApp Bot by Simon Tech",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "axios": "^1.7.7",
+    "express": "^4.19.2",
+    "pino": "^8.19.0"
+  }
+}
