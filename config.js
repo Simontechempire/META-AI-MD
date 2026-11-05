@@ -1,5 +1,5 @@
 // config.js - META AI MD by Simon Tech / META
-// Re-edited - Clean + Complete
+// Re-edited - Clean + Complete - PRIVATE FIXED
 
 module.exports = {
   // ===== BOT INFO =====
@@ -33,7 +33,11 @@ module.exports = {
   pairingNumber: '2348102350169', // number wey go receive pairing code
 
   // ===== MODE / SETTINGS =====
-  mode: 'public', // public | private | self
+  // IMPORTANT: This na the MAIN mode wey survive Render restart
+  // 'private' = only owner (2348102350169) fit use bot, bot no go reply another person
+  // 'public' = everybody fit use bot
+  // Change am here + push to make am permanent. .private / .public command na for temporary only.
+  mode: 'private',
   language: 'en',
   timezone: 'Africa/Lagos',
   totalCmds: 300,
