@@ -196,14 +196,22 @@ module.exports = [
   }
 },
 {
-  name: 'public', category: 'owner', ownerOnly: true,
-  run: async ({ reply, db }) => { if(!db.settings) db.settings={}; db.settings.mode='public'; return reply('✅ Bot is now PUBLIC - everybody fit use am'); }
-},
-{
-  name: 'private', category: 'owner', ownerOnly: true,
-  run: async ({ reply, db }) => { if(!db.settings) db.settings={}; db.settings.mode='private'; return reply('🔒 Bot is now PRIVATE - only owner fit use am'); }
-},
-{
+  if(cmdName === 'private' || cmdName === 'self'){
+  db.settings = db.settings || {};
+  db.settings.mode = 'private';
+  db.mode = 'private';
+  config.mode = 'private'; // update live config too
+  if(F) F.saveDB(db);
+  return await reply('Bot now PRIVATE - Only owner fit use am.\nNote: To make am permanent after restart, change config.js mode to private too.');
+}
+if(cmdName === 'public'){
+  db.settings = db.settings || {};
+  db.settings.mode = 'public';
+  db.mode = 'public';
+  config.mode = 'public';
+  if(F) F.saveDB(db);
+  return await reply('Bot now PUBLIC - Everybody fit use am.');
+  }
   name: 'update', category: 'owner', ownerOnly: true,
   run: async ({ reply }) => { return reply('🔄 Update: Pull latest from GitHub and restart.\nOn Render: Manual Deploy > Deploy latest commit'); }
 },
