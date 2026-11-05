@@ -1,6 +1,5 @@
 // plugins/missing.js - 134 missing cmds to make 300 total
 // No external API needed for most - works offline
-
 module.exports = [
   // ===== OWNER - 13 =====
   { name: 'alive', run: async ({reply, config}) => reply(`✅ *${config.botName} IS ALIVE!*\n\n👑 Owner: ${config.ownerAlias}\n⚡ Speed: Fast\n📅 ${new Date().toLocaleString()}`) },
