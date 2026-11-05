@@ -6,7 +6,17 @@ const fs = require('fs');
 const pino = require('pino');
 const config = require('./config');
 const F = require('./lib/function');
-const { getMenu } = require('./lib/menu');
+const { getMenu, MENU_PFP } = require('./lib/menu');
+
+if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
+  try{
+    let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting });
+    return await sock.sendMessage(from, {
+      image: { url: MENU_PFP },
+      caption: menuText
+    }, { quoted: m });
+  }catch(e){ return await reply('Menu error: '+e.message); }
+}
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
