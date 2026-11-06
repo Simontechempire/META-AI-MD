@@ -4,7 +4,7 @@
 
 const BADWORDS = ['fuck','shit','bitch','bastard','idiot','mumu','olosho','ashawo','dick','pussy','sex','porn','penis','vagina','fuck you','motherfucker','asshole'];
 const SPAM_TRACK = {}; // user -> { count, lastTime }
-const deletedCache = new Map(); // msgId -> {text, sender, from}
+const deletedCache = new Map(); // msgId -> {text, sender, from, time}
 
 // ===== Use MAIN db, no separate file =====
 function getGroup(db, jid){
@@ -50,20 +50,36 @@ function clearWarn(db, gid, uid, F){
   if (F) F.saveDB(db);
 }
 
+// FIXED ERROR 2: LID fix - check id OR phoneNumber OR participantPn for admin + bot admin
 async function isAdmin(sock, gid, uid){
   try{
     let meta = await sock.groupMetadata(gid);
-    let p = meta.participants.find(x => x.id === uid);
+    let num = String(uid || '').split('@')[0].replace(/[^0-9]/g, '');
+    let p = meta.participants.find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
     return p?.admin === 'admin' || p?.admin === 'superadmin';
   }catch{ return false; }
 }
 async function isBotAdmin(sock, gid){
   try{
     let meta = await sock.groupMetadata(gid);
-    let myId = sock.user.id.split(':')[0];
-    let p = meta.participants.find(x => x.id.split('@')[0] === myId);
+    let myNum = String(sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
+    let myPn = sock.user?.id || '';
+    let myLid = String(sock.user?.lid || '').split('@')[0].replace(/[^0-9]/g, '');
+    let p = meta.participants.find(x => x.id === myPn || x.phoneNumber === myPn || String(x.phoneNumber || '').split('@')[0] === myNum || String(x.id || '').split('@')[0] === myNum || (myLid && String(x.id || '').split('@')[0] === myLid));
     return p?.admin === 'admin' || p?.admin === 'superadmin';
   }catch{ return false; }
+}
+// FIXED ERROR 1: Self-check admin for commands - index.js no dey send ctx.isAdmin
+async function isAdminForCommand(sock, ctx){
+  if (ctx.isOwner) return true;
+  if (ctx.isAdmin) return true;
+  try {
+    let meta = await sock.groupMetadata(ctx.from);
+    let senderId = ctx.sender || '';
+    let senderNum = String(ctx.senderNum || senderId).replace(/[^0-9]/g, '');
+    let p = (meta.participants || []).find(x => x.id === senderId || x.phoneNumber === senderId || String(x.phoneNumber || '').split('@')[0] === senderNum || String(x.id || '').split('@')[0] === senderNum);
+    return !!(p && (p.admin === 'admin' || p.admin === 'superadmin'));
+  } catch(e){ return false; }
 }
 
 async function punish(sock, m, gid, uid, reason, db, F){
@@ -110,6 +126,7 @@ async function handleProtection(sock, m, db, F, config){
     // Owner bypass
     let isOwner = false;
     try { if (F?.isOwner) isOwner = F.isOwner(uid, db); } catch(e){}
+    if (!isOwner) { try { if (F?.isOwnerMessage) isOwner = F.isOwnerMessage(m, db); } catch(e){} }
     if (isOwner) return false;
 
     let text = '';
@@ -270,7 +287,7 @@ async function handleCommands(sock, m, ctx){
   const toggles = ['antigroupstatus','antigcstatus','antilink','antibadword','antitag','antidelete','antisticker','antiimage','antivideo','antiaudio','antidocument','antiforward','antispam','antifake','antibot','antinsfw','antiviewonce','antimention','antiedit'];
 
   if(toggles.includes(cmdName)){
-    if (!isOwner && !isAdmin) return await reply(`❌ ONLY ADMIN FIT USE AM`);
+    if (!await isAdminForCommand(sock, ctx)) return await reply(`❌ ONLY ADMIN FIT USE AM`);
     let val = (args[0] || '').toLowerCase();
     if(val !== 'on' && val !== 'off') return await reply(`USAGE : ${prefix}${cmdName} on/off\nEXAMPLE : ${prefix}${cmdName} on`);
     let s = getGroup(db, gid);
@@ -283,7 +300,7 @@ async function handleCommands(sock, m, ctx){
   }
 
   if(cmdName === 'protectionall'){
-    if (!isOwner && !isAdmin) return await reply(`❌ ONLY ADMIN`);
+    if (!await isAdminForCommand(sock, ctx)) return await reply(`❌ ONLY ADMIN`);
     let val = (args[0] || '').toLowerCase() === 'on';
     let s = getGroup(db, gid);
     for(let k in s) s[k] = val;
