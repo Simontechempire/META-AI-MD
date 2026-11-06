@@ -1,4 +1,5 @@
 // commands/owner.js - OWNER MENU 1-30 by Simon Tech
+// FIXED - Private / Public + Prefix work 100%
 
 module.exports = [
 {
@@ -51,8 +52,8 @@ module.exports = [
 },
 {
   name: 'broadcast', aliases: ['bc'], category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, text, args }) => {
-    if (!text) return reply('Usage: .broadcast Hello everyone');
+  run: async ({ reply, sock, text, args, prefix }) => {
+    if (!text) return reply(`Usage: ${prefix}broadcast Hello everyone`);
     let chats = await sock.groupFetchAllParticipating().catch(()=>({}));
     let ids = Object.keys(chats);
     let sent = 0;
@@ -62,41 +63,46 @@ module.exports = [
 },
 {
   name: 'setprefix', category: 'owner', ownerOnly: true,
-  run: async ({ reply, args, db }) => {
-    if (!args[0]) return reply('Usage: .setprefix !');
+  run: async ({ reply, args, db, config, prefix }) => {
+    if (!args[0]) return reply(`Usage: ${prefix}setprefix !`);
+    const newPrefix = args[0];
+    // FIX: Update LIVE config + db + prefixes array - so old prefix die immediately
+    config.prefix = newPrefix;
+    config.prefixes = [newPrefix];
     if (!db.settings) db.settings = {};
-    db.settings.prefix = args[0];
-    return reply(`✅ Prefix changed to: ${args[0]}`);
+    db.settings.prefix = newPrefix;
+    db.settings.prefixes = [newPrefix];
+    return reply(`✅ Prefix changed to: ${newPrefix}\n\nNow use: ${newPrefix}menu\nOld prefix ${prefix}menu no go work again.`);
   }
 },
 {
   name: 'setname', aliases: ['setbotname'], category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, text }) => {
-    if (!text) return reply('Usage: .setname META AI MD');
+  run: async ({ reply, sock, text, prefix }) => {
+    if (!text) return reply(`Usage: ${prefix}setname META AI MD`);
     await sock.updateProfileName(text).catch(()=>{});
     return reply(`✅ Bot name changed to: ${text}`);
   }
 },
 {
   name: 'setbio', aliases: ['setstatus', 'setautobio'], category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, text }) => {
-    if (!text) return reply('Usage: .setbio I am META AI MD');
+  run: async ({ reply, sock, text, prefix }) => {
+    if (!text) return reply(`Usage: ${prefix}setbio I am META AI MD`);
     await sock.updateProfileStatus(text).catch((e)=>{ return reply('Bio failed: '+e.message); });
     return reply(`✅ Bio changed to: ${text}`);
   }
 },
 {
   name: 'setpp', category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, m, F }) => {
+  run: async ({ reply, sock, m, F, prefix }) => {
     let buf = await F.downloadMedia(m).catch(()=>null);
-    if (!buf) return reply('Send / reply to image first. .setpp');
+    if (!buf) return reply(`Send / reply to image first. ${prefix}setpp`);
     try { await sock.updateProfilePicture(sock.user.id, buf); return reply('✅ Profile pic changed!'); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
   name: 'join', category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, args }) => {
-    if (!args[0]) return reply('Usage: .join https://chat.whatsapp.com/xxx');
+  run: async ({ reply, sock, args, prefix }) => {
+    if (!args[0]) return reply(`Usage: ${prefix}join https://chat.whatsapp.com/xxx`);
     let link = args[0].split('/').pop();
     try { let r = await sock.groupAcceptInvite(link); return reply(`✅ Joined group: ${r}`); } catch(e){ return reply('Join failed: '+e.message); }
   }
@@ -111,27 +117,27 @@ module.exports = [
 },
 {
   name: 'block', category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, m, F, args }) => {
+  run: async ({ reply, sock, m, F, args, prefix }) => {
     let target = F.getTarget(m, args);
-    if (!target) return reply('Reply / tag / number. .block @user');
+    if (!target) return reply(`Reply / tag / number. ${prefix}block @user`);
     await sock.updateBlockStatus(target, 'block').catch(()=>{});
     return reply(`🚫 Blocked @${target.split('@')[0]}`);
   }
 },
 {
   name: 'unblock', category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, m, F, args }) => {
+  run: async ({ reply, sock, m, F, args, prefix }) => {
     let target = F.getTarget(m, args);
-    if (!target) return reply('Reply / tag / number. .unblock @user');
+    if (!target) return reply(`Reply / tag / number. ${prefix}unblock @user`);
     await sock.updateBlockStatus(target, 'unblock').catch(()=>{});
     return reply(`✅ Unblocked @${target.split('@')[0]}`);
   }
 },
 {
   name: 'ban', category: 'owner', ownerOnly: true,
-  run: async ({ reply, m, F, args, db }) => {
+  run: async ({ reply, m, F, args, prefix }) => {
     let target = F.getTarget(m, args);
-    if (!target) return reply('Usage: .ban @user');
+    if (!target) return reply(`Usage: ${prefix}ban @user`);
     if (!db.banned) db.banned = [];
     let num = target.split('@')[0];
     if (!db.banned.includes(num)) db.banned.push(num);
@@ -140,9 +146,9 @@ module.exports = [
 },
 {
   name: 'unban', category: 'owner', ownerOnly: true,
-  run: async ({ reply, m, F, args, db }) => {
+  run: async ({ reply, m, F, args, db, prefix }) => {
     let target = F.getTarget(m, args);
-    if (!target) return reply('Usage: .unban @user');
+    if (!target) return reply(`Usage: ${prefix}unban @user`);
     if (!db.banned) db.banned = [];
     let num = target.split('@')[0];
     db.banned = db.banned.filter(x=>x!==num);
@@ -162,18 +168,18 @@ module.exports = [
 },
 {
   name: 'setowner', category: 'owner', ownerOnly: true,
-  run: async ({ reply, args, db, F }) => {
+  run: async ({ reply, args, db, F, prefix }) => {
     let num = F.cleanNumber(args[0]);
-    if (!num) return reply('Usage: .setowner 2348102350169');
+    if (!num) return reply(`Usage: ${prefix}setowner 2348102350169`);
     db.owners = [num];
     return reply(`✅ Main owner set to +${num}`);
   }
 },
 {
   name: 'addowner', category: 'owner', ownerOnly: true,
-  run: async ({ reply, args, db, F }) => {
+  run: async ({ reply, args, db, F, prefix }) => {
     let num = F.cleanNumber(args[0]);
-    if (!num) return reply('Usage: .addowner 2348102350169');
+    if (!num) return reply(`Usage: ${prefix}addowner 2348102350169`);
     if (!db.owners) db.owners = ['2348102350169'];
     if (!db.owners.includes(num)) db.owners.push(num);
     return reply(`✅ Added owner +${num}`);
@@ -181,7 +187,7 @@ module.exports = [
 },
 {
   name: 'delowner', category: 'owner', ownerOnly: true,
-  run: async ({ reply, args, db, F }) => {
+  run: async ({ reply, args, db, F, prefix }) => {
     let num = F.cleanNumber(args[0]);
     if (!db.owners) db.owners = ['2348102350169'];
     db.owners = db.owners.filter(x=>x!==num);
@@ -195,23 +201,36 @@ module.exports = [
     return reply(`👑 *OWNERS LIST*\n\n${owners.map((o,i)=>`${i+1}. +${o}`).join('\n')}`);
   }
 },
+// ===== FIXED PRIVATE / PUBLIC - Now na real commands =====
 {
-  if(cmdName === 'private' || cmdName === 'self'){
-  db.settings = db.settings || {};
-  db.settings.mode = 'private';
-  db.mode = 'private';
-  config.mode = 'private'; // update live config too
-  if(F) F.saveDB(db);
-  return await reply('Bot now PRIVATE - Only owner fit use am.\nNote: To make am permanent after restart, change config.js mode to private too.');
-}
-if(cmdName === 'public'){
-  db.settings = db.settings || {};
-  db.settings.mode = 'public';
-  db.mode = 'public';
-  config.mode = 'public';
-  if(F) F.saveDB(db);
-  return await reply('Bot now PUBLIC - Everybody fit use am.');
+  name: 'private', aliases: ['self'], category: 'owner', ownerOnly: true,
+  run: async ({ reply, db, config, F, prefix }) => {
+    db.settings = db.settings || {};
+    db.settings.mode = 'private';
+    db.mode = 'private';
+    config.mode = 'private';
+    if (F && F.saveDB) F.saveDB(db);
+    return reply(`🔒 Bot now *PRIVATE* - Only owner fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu\n\nNote: To make am permanent after restart, change config.js mode to 'private' too.`);
   }
+},
+{
+  name: 'public', aliases: ['all'], category: 'owner', ownerOnly: true,
+  run: async ({ reply, db, config, F, prefix }) => {
+    db.settings = db.settings || {};
+    db.settings.mode = 'public';
+    db.mode = 'public';
+    config.mode = 'public';
+    if (F && F.saveDB) F.saveDB(db);
+    return reply(`🌍 Bot now *PUBLIC* - Everybody fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu\n\nNote: To make am permanent after restart, change config.js mode to 'public' too.`);
+  }
+},
+{
+  name: 'mode', category: 'owner', ownerOnly: true,
+  run: async ({ reply, config }) => {
+    return reply(`🌐 *Current Mode:* ${config.mode.toUpperCase()}\n\n🔒 ${config.prefix}private = Only you\n🌍 ${config.prefix}public = Everybody\n\nPrefix: ${config.prefix}`);
+  }
+},
+{
   name: 'update', category: 'owner', ownerOnly: true,
   run: async ({ reply }) => { return reply('🔄 Update: Pull latest from GitHub and restart.\nOn Render: Manual Deploy > Deploy latest commit'); }
 },
