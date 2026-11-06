@@ -1,5 +1,5 @@
 // config.js - META AI MD by Simon Tech / META
-// FIXED - Public First + Owner fit change to Private with ,mode private
+// Re-edited - Clean + Complete - PRIVATE FIXED
 
 module.exports = {
   // ===== BOT INFO =====
@@ -7,23 +7,15 @@ module.exports = {
   botNameShort: 'META',
   ownerName: 'META',
   ownerAlias: 'Simon Tech',
-  ownerNumber: '2348102350169',
-  owners: ['2348102350169', '23223458631686'],
-  ownerLids: ['23223458631686'],
+  ownerNumber: '2348102350169', // +234 810 235 0169 - no + , no space
+  owners: ['2348102350169'],
   ownerJid: '2348102350169@s.whatsapp.net',
-  botNumber: '',
+  botNumber: '', // auto-filled after pairing, leave empty
 
-  // ===== PREFIX - FIXED =====
-  // CHANGE ONLY HERE! Put your new prefix here
-  prefix: ',', // <-- YOUR NEW PREFIX HERE
-  prefixes: [','], // <-- MUST MATCH prefix above, same one only
-
-  // ===== FORCE CONFIG - PUBLIC FIRST SYSTEM =====
-  // forceConfigPrefix: true = prefix always come from here, database no fit change am
-  // forceConfigMode: FALSE = owner fit change mode with ,mode public / ,mode private
-  // If you put forceConfigMode: true, ,mode command go NEVER work - e go always force back
-  forceConfigPrefix: true,
-  forceConfigMode: false,
+  // ===== PREFIX =====
+  // Bot go answer to ALL of these
+  prefixes: ['.', '!', '?', '@', '-', '/'],
+  prefix: '.',
 
   // ===== STYLE / FOOTER =====
   footer: '©️ created by Simon tech inc',
@@ -36,33 +28,34 @@ module.exports = {
   // ===== SESSION / PAIRING =====
   sessionName: 'Meta',
   sessionFolder: './Meta',
-  sessionId: process.env.SESSION_ID || '',
-  pairing: true,
-  pairingNumber: '2348102350169',
+  sessionId: process.env.SESSION_ID || '', // paste your session id here if you get one
+  pairing: true, // true = use pairing code, false = QR
+  pairingNumber: '2348102350169', // number wey go receive pairing code
 
   // ===== MODE / SETTINGS =====
-  // Bot ALWAYS start PUBLIC - anybody fit use am
-  // Owner go change am later with: ,mode private
-  // To go back public: ,mode public
-  mode: 'public',
+  // IMPORTANT: This na the MAIN mode wey survive Render restart
+  // 'private' = only owner (2348102350169) fit use bot, bot no go reply another person
+  // 'public' = everybody fit use bot
+  // Change am here + push to make am permanent. .private / .public command na for temporary only.
+  mode: 'private',
   language: 'en',
   timezone: 'Africa/Lagos',
   totalCmds: 300,
-  warnLimit: 3,
+  warnLimit: 3, // 3 warns = kick
   deleteAfterWarn: true,
 
   // ===== HOSTING =====
   hosting: 'Render',
   port: process.env.PORT || 10000,
-  appUrl: process.env.APP_URL || '',
+  appUrl: process.env.APP_URL || '', // e.g https://meta-ai-md.onrender.com
 
   // ===== LINKS =====
   repo: 'https://github.com/SimonTech/META-AI-MD',
-  channel: 'https://whatsapp.com/channel/0029Vb...',
-  group: 'https://chat.whatsapp.com/...',
+  channel: 'https://whatsapp.com/channel/0029Vb...', // put your channel
+  group: 'https://chat.whatsapp.com/...', // put your group
   support: 'https://wa.me/2348102350169',
 
-  // ===== AUTO DEFAULTS =====
+  // ===== AUTO DEFAULTS (all OFF by default) =====
   auto: {
     autoread: false,
     autotyping: false,
@@ -71,7 +64,7 @@ module.exports = {
     autoreact: false,
     autoreply: false,
     autosticker: false,
-    autoview: false,
+    autoview: false, // autoview status
     autobio: false,
     autolikestatus: false,
     autodownload: false,
@@ -85,10 +78,11 @@ module.exports = {
     autoclean: false,
   },
 
-  // ===== ANTI / PROTECTION =====
+  // ===== ANTI / PROTECTION DEFAULTS =====
+  // All OFF by default - Admin go turn ON with .antigroupstatus on etc
   anti: {
-    antigroupstatus: false,
-    antigcstatus: false,
+    antigroupstatus: false, // mention/tag for status - delete + warn
+    antigcstatus: false,    // share group status if not admin - delete + warn
     antilink: false,
     antibadword: false,
     antisticker: false,
@@ -111,24 +105,27 @@ module.exports = {
     antidemote: false,
   },
 
+  // ===== PROTECTION RULE =====
   protection: {
     enabled: true,
     warn1: '⚠️ Warning 1/3 - Message Deleted',
     warn2: '⚠️ Warning 2/3 - One More = Kick',
     warn3: '🦶 Kicked - 3/3 Violations',
-    adminBypass: true,
+    adminBypass: true, // admins no go chop warn
     botMustBeAdminToKick: true,
   },
 
+  // ===== WELCOME / GOODBYE =====
   welcome: {
     enabled: false,
-    text: '👋 Welcome @user to @group!\n> Type ,menu for commands\n> META AI MD',
+    text: '👋 Welcome @user to @group!\n> Type .menu for commands\n> META AI MD',
   },
   goodbye: {
     enabled: false,
     text: '👋 Bye @user, we go miss you 😭\n> META AI MD',
   },
 
+  // ===== MESSAGES =====
   messages: {
     ownerOnly: '❌ Owner only command.',
     adminOnly: '❌ Admins only.',
@@ -148,6 +145,7 @@ module.exports = {
     kicked: '🦶 Kicked for breaking rules',
   },
 
+  // ===== API (free, no key) =====
   apis: {
     ai: 'https://text.pollinations.ai/',
     ai2: 'https://api.vreden.my.id/api/gpt?query=',
@@ -172,14 +170,16 @@ module.exports = {
     trigger: 'https://api.vreden.my.id/api/trigger?url=',
   },
 
+  // ===== STICKER =====
   sticker: {
     pack: 'META AI MD',
     author: 'SIMON TECH',
     quality: 80,
   },
 
+  // ===== LIMITS =====
   limits: {
-    maxFileSize: 100 * 1024 * 1024,
+    maxFileSize: 100 * 1024 * 1024, // 100MB
     downloadTimeout: 30000,
     aiTimeout: 20000,
   }
