@@ -1,10 +1,13 @@
 // commands/owner.js + plugins/owner.js - OWNER MENU REAL by Simon Tech
-// REAL - No crash, No demo, Save DB, Real mode/prefix
+// FIXED - Public First + ,mode actually changes mode now
 
 function getRealMode(db, config){
-  return db?.settings?.mode || db?.mode || config?.mode || 'private';
+  // FIX: fallback public, not private - use F.getMode logic
+  if (config?.forceConfigMode && config?.mode) return config.mode;
+  return db?.settings?.mode || db?.mode || config?.mode || 'public';
 }
 function getRealPrefix(db, config){
+  if (config?.forceConfigPrefix && config?.prefix) return config.prefix;
   return db?.settings?.prefix || config?.prefix || ',';
 }
 
@@ -37,7 +40,6 @@ module.exports = [
 {
   name: 'owner', category: 'owner',
   run: async ({ reply, sock, config, from }) => {
-    // REAL: Send vCard to the person wey ask, no be arguments[0]
     let vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${config.ownerAlias}\nORG:Simon Tech Inc;\nTEL;TYPE=CELL;TYPE=VOICE;waid=${config.ownerNumber}:${config.ownerNumber}\nEND:VCARD`;
     try {
       await sock.sendMessage(from, { contacts: { displayName: config.ownerAlias, contacts: [{ displayName: config.ownerAlias, vcard }] } });
@@ -77,7 +79,7 @@ module.exports = [
       try {
         await sock.sendMessage(id, { text: `📢 *BROADCAST FROM META AI MD*\n\n${text}\n\n©️ created by Simon tech inc` });
         sent++;
-        await new Promise(r=>setTimeout(r, 1000)); // REAL anti-ban delay 1s, no be 500ms spam
+        await new Promise(r=>setTimeout(r, 1000));
       } catch(e){ failed++; }
     }
     return reply(`✅ Broadcast done\nSent: ${sent} groups\nFailed: ${failed}`);
@@ -94,7 +96,7 @@ module.exports = [
     if (!db.settings) db.settings = {};
     db.settings.prefix = newPrefix;
     db.settings.prefixes = [newPrefix];
-    if (F) F.saveDB(db); // REAL SAVE - no go reset after restart
+    if (F) F.saveDB(db);
     return reply(`✅ Prefix changed to: ${newPrefix}\n\nNow use: ${newPrefix}menu\nOld prefix ${prefix}menu no go work again.`);
   }
 },
@@ -250,9 +252,8 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'private';
     db.mode = 'private';
-    config.mode = 'private';
     if (F && F.saveDB) F.saveDB(db);
-    return reply(`🔒 Bot now *PRIVATE* - Only owner fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu\n\nNote: To make am permanent after restart, change config.js mode to 'private' too.`);
+    return reply(`🔒 Bot now *PRIVATE* - Only owner fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
   }
 },
 {
@@ -261,17 +262,26 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'public';
     db.mode = 'public';
-    config.mode = 'public';
     if (F && F.saveDB) F.saveDB(db);
-    return reply(`🌍 Bot now *PUBLIC* - Everybody fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu\n\nNote: To make am permanent after restart, change config.js mode to 'public' too.`);
+    return reply(`🌍 Bot now *PUBLIC* - Everybody fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
   }
 },
 {
-  name: 'mode', category: 'owner', ownerOnly: true,
-  run: async ({ reply, config, db }) => {
+  name: 'mode', aliases: ['setmode'], category: 'owner', ownerOnly: true,
+  run: async ({ reply, config, db, args, prefix, F }) => {
+    let newMode = (args?.[0] || '').toLowerCase();
+    // FIX: ,mode private / ,mode public now ACTUALLY change mode - before e only show mode
+    if (newMode === 'public' || newMode === 'private') {
+      db.settings = db.settings || {};
+      db.settings.mode = newMode;
+      db.mode = newMode;
+      if (F && F.saveDB) F.saveDB(db);
+      return reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only owner fit use bot now.' : '🌍 Anybody fit use bot now.'}\n\nPrefix: ${prefix}\nCheck with: ${prefix}mode`);
+    }
+    if (newMode) return reply(`❌ Use: ${prefix}mode public OR ${prefix}mode private`);
     let mode = getRealMode(db, config);
-    let prefix = getRealPrefix(db, config);
-    return reply(`🌐 *Current Mode:* ${mode.toUpperCase()}\n\n🔒 ${prefix}private = Only you\n🌍 ${prefix}public = Everybody\n\nPrefix: ${prefix}`);
+    let pfx = getRealPrefix(db, config);
+    return reply(`🌐 *Current Mode:* ${mode.toUpperCase()}\n\n🔒 ${pfx}private = Only you\n🌍 ${pfx}public = Everybody\n⚙️ Change: ${pfx}mode public OR ${pfx}mode private\n\nPrefix: ${pfx}`);
   }
 },
 {
