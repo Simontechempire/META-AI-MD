@@ -1,35 +1,46 @@
-// commands/owner.js + plugins/owner.js - OWNER MENU REAL by Simon Tech
-// FIXED - Public First + ,mode actually changes mode now
+// plugins/owner.js - OWNER MENU by Simon Tech
+// Public First + mode actually changes mode now
 
 function getRealMode(db, config){
-  // FIXED ERROR 1: DB must win - na wetin user change with ,mode command. Config na only default for first start.
+  // DB must win - this is what the user changed with ,mode. Config is only default for first start.
   if (db?.settings?.mode) return db.settings.mode;
   if (db?.mode) return db.mode;
   if (config?.forceConfigMode && config?.mode) return config.mode;
   return config?.mode || 'public';
 }
 function getRealPrefix(db, config){
-  // FIXED ERROR 1: Same for prefix - DB first, so ,setprefix no go reset
+  // Same for prefix - DB first, so ,setprefix does not reset
   if (db?.settings?.prefix) return db.settings.prefix;
   if (config?.forceConfigPrefix && config?.prefix) return config.prefix;
-  return config?.prefix || ',';
+  return config?.prefix || '.';
 }
-// FIXED ERROR 2: Ban must store both LID + PN so e go match for DM and group
+// Ban must store both LID + PN so it matches in DM and group
 function getBanNums(ctx, target){
   let nums = [];
   let raw = String(target || '').split('@')[0].replace(/[^0-9]/g, '');
   if (raw) nums.push(raw);
-  // If target na LID, try get real PN from quoted / mentioned context
   try {
-    let ctxInfo = ctx.m?.message?.extendedTextMessage?.contextInfo || ctx.m?.message?.imageMessage?.contextInfo || {};
-    let pn = String(ctxInfo.participantPn || ctxInfo.mentionedJid?.[0] || '').split('@')[0].replace(/[^0-9]/g, '');
-    // Only add if e look like real phone (different from LID and starts with country code)
-    if (pn && pn !== raw) nums.push(pn);
-    // Also check quoted participantPn
-    let qPn = String(ctx.m?.message?.extendedTextMessage?.contextInfo?.quotedMessage ? ctxInfo.participantPn || '' : '').split('@')[0].replace(/[^0-9]/g, '');
+    let ctxInfo = ctx.m?.message?.extendedTextMessage?.contextInfo || ctx.m?.message?.imageMessage?.contextInfo || ctx.m?.message?.videoMessage?.contextInfo || {};
+    // Real PN is in participantPn, not mentionedJid (mentionedJid is often LID)
+    let pn = String(ctxInfo.participantPn || '').split('@')[0].replace(/[^0-9]/g, '');
+    if (pn && pn !== raw && !nums.includes(pn)) nums.push(pn);
+    // Quoted message PN
+    let qPn = String(ctxInfo.quotedMessage ? (ctx.m?.key?.participantPn || '') : '').split('@')[0].replace(/[^0-9]/g, '');
     if (qPn && qPn !== raw && !nums.includes(qPn)) nums.push(qPn);
+    // Sender PN itself - for reply-to-self ban
+    let senderPn = String(ctx.m?.key?.participantPn || ctx.m?.key?.remoteJidAlt || '').split('@')[0].replace(/[^0-9]/g, '');
+    if (senderPn && senderPn !== raw && target && String(target).includes(senderPn)) nums.push(senderPn);
   } catch(e){}
   return nums;
+}
+function getTargetPn(m, target){
+  // Return real PN for mentions, fallback to target
+  let pn = m?.key?.participantPn || m?.key?.remoteJidAlt || '';
+  if (pn && target && String(target).split('@')[0] !== String(pn).split('@')[0]) {
+    // Target is LID, PN is different - prefer PN for display
+    return pn;
+  }
+  return target;
 }
 
 module.exports = [
@@ -43,11 +54,11 @@ module.exports = [
 },
 {
   name: 'ping', category: 'owner',
-  run: async ({ reply, sock }) => {
+  run: async ({ reply, sock, config }) => {
     let start = Date.now();
     await sock.sendPresenceUpdate('available').catch(()=>{});
     let ms = Date.now() - start;
-    return reply(`🏓 *Pong!* ${ms}ms\n⚡ META AI MD Fast ✅\n🕒 ${new Date().toLocaleString('en-NG',{timeZone:'Africa/Lagos'})}`);
+    return reply(`🏓 *Pong!* ${ms}ms\n⚡ META AI MD - Fast\n🕒 ${new Date().toLocaleString('en-US',{timeZone: config?.timezone || 'Africa/Lagos'})}`);
   }
 },
 {
@@ -55,7 +66,7 @@ module.exports = [
   run: async ({ reply, config, db, F }) => {
     let mode = getRealMode(db, config);
     let prefix = getRealPrefix(db, config);
-    return reply(`◈┈▉ \`meta ai ｍｄ\` ▉┄◈\n\n✅ *I AM ALIVE!*\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n⏱️ Runtime: ${F ? F.runtime() : 'unknown'}\n🌍 Lagos, Nigeria\n\n©️ created by Simon tech inc`);
+    return reply(`◈┈▉ \`META AI MD\` ▉┄◈\n\n✅ *I AM ALIVE!*\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n⏱️ Runtime: ${F ? F.runtime() : 'unknown'}\n\n©️ Created by Simon Tech Inc`);
   }
 },
 {
@@ -71,14 +82,14 @@ module.exports = [
 },
 {
   name: 'runtime', category: 'owner',
-  run: async ({ reply, F }) => { return reply(`⏱️ *Runtime:* ${F.runtime()}\n\n©️ created by Simon tech inc`); }
+  run: async ({ reply, F }) => { return reply(`⏱️ *Runtime:* ${F.runtime()}\n\n©️ Created by Simon Tech Inc`); }
 },
 {
   name: 'botinfo', category: 'owner',
   run: async ({ reply, config, F, db }) => {
     let mode = getRealMode(db, config);
     let prefix = getRealPrefix(db, config);
-    return reply(`◈┈▉ \`meta ai ｍｄ\` ▉┄◈\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n📞 Owner: +${config.ownerNumber}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n🖥️ Hosting: ${config.hosting}\n⏱️ Runtime: ${F.runtime()}\n📦 Total Cmds: 300\n🕒 Timezone: Africa/Lagos\n\n©️ created by Simon tech inc`);
+    return reply(`◈┈▉ \`META AI MD\` ▉┄◈\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n📞 Owner: +${config.ownerNumber}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n🖥️ Hosting: ${config.hosting}\n⏱️ Runtime: ${F.runtime()}\n📦 Total Commands: 300\n🕒 Timezone: ${config.timezone || 'Africa/Lagos'}\n\n©️ Created by Simon Tech Inc`);
   }
 },
 {
@@ -87,7 +98,7 @@ module.exports = [
 },
 {
   name: 'shutdown', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { await reply('🛑 Shutting down... Bye 👋'); setTimeout(()=> process.exit(0), 1000); }
+  run: async ({ reply }) => { await reply('🛑 Shutting down... Goodbye 👋'); setTimeout(()=> process.exit(0), 1000); }
 },
 {
   name: 'broadcast', aliases: ['bc'], category: 'owner', ownerOnly: true,
@@ -98,7 +109,7 @@ module.exports = [
     let sent = 0, failed = 0;
     for (let id of ids) {
       try {
-        await sock.sendMessage(id, { text: `📢 *BROADCAST FROM META AI MD*\n\n${text}\n\n©️ created by Simon tech inc` });
+        await sock.sendMessage(id, { text: `📢 *BROADCAST FROM META AI MD*\n\n${text}\n\n©️ Created by Simon Tech Inc` });
         sent++;
         await new Promise(r=>setTimeout(r, 1000));
       } catch(e){ failed++; }
@@ -111,16 +122,18 @@ module.exports = [
   run: async ({ reply, args, db, config, prefix, F }) => {
     if (!args[0]) return reply(`Usage: ${prefix}setprefix !`);
     const newPrefix = args[0];
-    if (newPrefix.length > 2) return reply('❌ Prefix too long. Use 1 char like , ! . #');
+    if (newPrefix.length > 2) return reply('❌ Prefix too long. Use 1 character like , ! . #');
+    // Keep all old prefixes, put new one first - do not delete . , ! etc
+    let oldList = Array.isArray(config.prefixes) ? config.prefixes : [config.prefix || '.'];
+    let newList = [newPrefix, ...oldList.filter(p => p !== newPrefix)];
     config.prefix = newPrefix;
-    config.prefixes = [newPrefix];
-    // FIXED: Turn off force so DB go win after restart, no reset to old config prefix
+    config.prefixes = newList;
     config.forceConfigPrefix = false;
     if (!db.settings) db.settings = {};
     db.settings.prefix = newPrefix;
-    db.settings.prefixes = [newPrefix];
+    db.settings.prefixes = newList;
     if (F) F.saveDB(db);
-    return reply(`✅ Prefix changed to: ${newPrefix}\n\nNow use: ${newPrefix}menu\nOld prefix ${prefix}menu no go work again.`);
+    return reply(`✅ Prefix changed to: ${newPrefix}\n\nNow use: ${newPrefix}menu\nAll old prefixes still work too.`);
   }
 },
 {
@@ -156,8 +169,8 @@ module.exports = [
         }
       }
     } catch(e){}
-    if (!buf) return reply(`Send / reply to image first. ${prefix}setpp`);
-    try { await sock.updateProfilePicture(sock.user.id, buf); return reply('✅ Profile pic changed!'); } catch(e){ return reply('Failed: '+e.message); }
+    if (!buf) return reply(`Send / reply to an image first. ${prefix}setpp`);
+    try { await sock.updateProfilePicture(sock.user.id, buf); return reply('✅ Profile picture changed!'); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
@@ -171,8 +184,8 @@ module.exports = [
 {
   name: 'leave', category: 'owner', ownerOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    await reply('👋 Leaving... Bye!');
+    if (!isGroup) return reply('Use this command in a group.');
+    await reply('👋 Leaving... Goodbye!');
     await sock.groupLeave(from).catch(()=>{});
   }
 },
@@ -182,7 +195,8 @@ module.exports = [
     let target = F.getTarget(m, args);
     if (!target) return reply(`Reply / tag / number. ${prefix}block @user`);
     await sock.updateBlockStatus(target, 'block').catch(()=>{});
-    return reply(`🚫 Blocked @${target.split('@')[0]}`);
+    let pn = getTargetPn(m, target);
+    return reply(`🚫 Blocked @${String(pn).split('@')[0]}`, { mentions: [pn] });
   }
 },
 {
@@ -191,7 +205,8 @@ module.exports = [
     let target = F.getTarget(m, args);
     if (!target) return reply(`Reply / tag / number. ${prefix}unblock @user`);
     await sock.updateBlockStatus(target, 'unblock').catch(()=>{});
-    return reply(`✅ Unblocked @${target.split('@')[0]}`);
+    let pn = getTargetPn(m, target);
+    return reply(`✅ Unblocked @${String(pn).split('@')[0]}`, { mentions: [pn] });
   }
 },
 {
@@ -204,7 +219,8 @@ module.exports = [
     let nums = getBanNums(ctx, target);
     for (let num of nums) if (!db.banned.includes(num)) db.banned.push(num);
     if (F) F.saveDB(db);
-    return reply(`🚫 Banned @${nums[0]} - bot no go reply am again`);
+    let pn = getTargetPn(m, target);
+    return reply(`🚫 Banned @${String(pn).split('@')[0]} - The bot will no longer reply to them.`, { mentions: [pn] });
   }
 },
 {
@@ -217,19 +233,20 @@ module.exports = [
     let nums = getBanNums(ctx, target);
     db.banned = db.banned.filter(x=>!nums.includes(x));
     if (F) F.saveDB(db);
-    return reply(`✅ Unbanned @${nums[0]}`);
+    let pn = getTargetPn(m, target);
+    return reply(`✅ Unbanned @${String(pn).split('@')[0]}`, { mentions: [pn] });
   }
 },
 {
   name: 'clearsession', category: 'owner', ownerOnly: true,
   run: async ({ reply }) => {
     const fs = require('fs');
-    try { fs.rmSync('./Meta', { recursive: true, force: true }); return reply('✅ Session cleared. Restart bot and pair again.'); } catch(e){ return reply('Failed: '+e.message); }
+    try { fs.rmSync('./Meta', { recursive: true, force: true }); return reply('✅ Session cleared. Restart the bot and pair again.'); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
   name: 'getsession', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { return reply('📁 Session folder: ./Meta\nOn Render, go to Files > Meta to copy session. Or re-pair with new code.'); }
+  run: async ({ reply }) => { return reply('📁 Session folder: ./Meta\nOn Render, go to Files > Meta to copy the session. Or re-pair with a new code.'); }
 },
 {
   name: 'setowner', category: 'owner', ownerOnly: true,
@@ -278,10 +295,9 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'private';
     db.mode = 'private';
-    // FIXED: Also update config in memory + turn off force, so index.js go see am immediately
     if (config) { config.mode = 'private'; config.forceConfigMode = false; }
     if (F && F.saveDB) F.saveDB(db);
-    return reply(`🔒 Bot now *PRIVATE* - Only owner fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
+    return reply(`🔒 Bot is now *PRIVATE* - Only the owner can use it.\n\nYour prefix is still: ${prefix}\nTry: ${prefix}menu`);
   }
 },
 {
@@ -290,35 +306,32 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'public';
     db.mode = 'public';
-    // FIXED: Also update config in memory + turn off force
     if (config) { config.mode = 'public'; config.forceConfigMode = false; }
     if (F && F.saveDB) F.saveDB(db);
-    return reply(`🌍 Bot now *PUBLIC* - Everybody fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
+    return reply(`🌍 Bot is now *PUBLIC* - Everyone can use it.\n\nYour prefix is still: ${prefix}\nTry: ${prefix}menu`);
   }
 },
 {
   name: 'mode', aliases: ['setmode'], category: 'owner', ownerOnly: true,
   run: async ({ reply, config, db, args, prefix, F }) => {
     let newMode = (args?.[0] || '').toLowerCase();
-    // FIX: ,mode private / ,mode public now ACTUALLY change mode - before e only show mode
     if (newMode === 'public' || newMode === 'private') {
       db.settings = db.settings || {};
       db.settings.mode = newMode;
       db.mode = newMode;
-      // FIXED: Also update config in memory + turn off force, so getRealMode + index.js go see new mode
       if (config) { config.mode = newMode; config.forceConfigMode = false; }
       if (F && F.saveDB) F.saveDB(db);
-      return reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only owner fit use bot now.' : '🌍 Anybody fit use bot now.'}\n\nPrefix: ${prefix}\nCheck with: ${prefix}mode`);
+      return reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only the owner can use the bot now.' : '🌍 Everyone can use the bot now.'}\n\nPrefix: ${prefix}\nCheck with: ${prefix}mode`);
     }
     if (newMode) return reply(`❌ Use: ${prefix}mode public OR ${prefix}mode private`);
     let mode = getRealMode(db, config);
     let pfx = getRealPrefix(db, config);
-    return reply(`🌐 *Current Mode:* ${mode.toUpperCase()}\n\n🔒 ${pfx}private = Only you\n🌍 ${pfx}public = Everybody\n⚙️ Change: ${pfx}mode public OR ${pfx}mode private\n\nPrefix: ${pfx}`);
+    return reply(`🌐 *Current Mode:* ${mode.toUpperCase()}\n\n🔒 ${pfx}private = Only you\n🌍 ${pfx}public = Everyone\n⚙️ Change: ${pfx}mode public OR ${pfx}mode private\n\nPrefix: ${pfx}`);
   }
 },
 {
   name: 'update', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { return reply('🔄 Update: Pull latest from GitHub and restart.\nOn Render: Manual Deploy > Deploy latest commit'); }
+  run: async ({ reply }) => { return reply('🔄 Update: Pull the latest version from GitHub and restart.\nOn Render: Manual Deploy > Deploy latest commit'); }
 },
 {
   name: 'repo', aliases: ['sc', 'script'], category: 'owner',
