@@ -1,83 +1,196 @@
-// commands/group.js - GROUP MENU 111-140 by Simon Tech
+// commands/group.js + plugins/group.js - GROUP MENU REAL by Simon Tech
+// REAL - Admin check + Bot admin check + Save DB + Kick/Promote/Demote/Mute
+
+function needGroup(isGroup, reply){
+  if (!isGroup) { reply('❌ Group only. Use this command inside a group.'); return false; }
+  return true;
+}
+function needAdmin(ctx){
+  if (ctx.isOwner) return true;
+  if (ctx.isAdmin) return true;
+  ctx.reply('❌ Admins only. Only group admin fit use this.');
+  return false;
+}
+async function needBotAdmin(sock, from, reply){
+  try {
+    let md = await sock.groupMetadata(from);
+    let me = md.participants.find(p => p.id === sock.user.id || p.id.includes(sock.user.id.split(':')[0]));
+    let isBotAdmin = !!(me && (me.admin === 'admin' || me.admin === 'superadmin'));
+    if (!isBotAdmin) { await reply('❌ Bot must be admin to do this. Make bot admin first.'); return false; }
+    return true;
+  } catch(e){ await reply('Failed: '+e.message); return false; }
+}
+function save(db, F){ if (F) F.saveDB(db); }
 
 module.exports = [
 {
-  name: 'groupinfo', aliases: ['gcinfo'], category: 'group',
+  name: 'groupinfo', aliases: ['gcinfo'], category: 'group', groupOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
+    if (!needGroup(isGroup, reply)) return;
     let md = await sock.groupMetadata(from);
-    return reply(`◈┈▉ \`meta ai ｍｄ\` ▉┄◈\n\n*🏠 GROUP INFO*\n\n📌 Name: ${md.subject}\n🆔 ID: ${md.id}\n👥 Members: ${md.participants.length}\n👑 Admins: ${md.participants.filter(p=>p.admin).length}\n📝 Desc: ${md.desc || 'No desc'}\n📅 Created: ${new Date(md.creation*1000).toLocaleDateString('en-NG')}\n\n©️ created by Simon tech inc`);
+    return reply(`◈┈▉ \`meta ai ｍｄ\` ▉┄◈\n\n*🏠 GROUP INFO*\n\n📌 Name: ${md.subject}\n🆔 ID: ${md.id}\n👥 Members: ${md.participants.length}\n👑 Admins: ${md.participants.filter(p=>p.admin).length}\n📝 Desc: ${md.desc || 'No desc'}\n📅 Created: ${new Date(md.creation*1000).toLocaleDateString('en-NG')}\n🔒 Announce: ${md.announce ? 'Closed' : 'Open'}\n\n©️ created by Simon tech inc`);
   }
 },
 {
-  name: 'grouplink', aliases: ['link', 'invite link'], category: 'group',
+  name: 'grouplink', aliases: ['link', 'invitelink'], category: 'group', groupOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { let code = await sock.groupInviteCode(from); return reply(`🔗 *GROUP LINK*\nhttps://chat.whatsapp.com/${code}`); } catch(e){ return reply('Bot must be admin'); }
+    if (!needGroup(isGroup, reply)) return;
+    try { let code = await sock.groupInviteCode(from); return reply(`🔗 *GROUP LINK*\nhttps://chat.whatsapp.com/${code}`); } catch(e){ return reply('❌ Bot must be admin to get link'); }
   }
 },
 {
-  name: 'setgroupname', aliases: ['setgname'], category: 'group',
-  run: async ({ reply, sock, from, isGroup, text }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .setgroupname New Name');
-    try { await sock.groupUpdateSubject(from, text); return reply(`✅ Group name changed to: ${text}`); } catch(e){ return reply('Bot must be admin'); }
+  name: 'setgroupname', aliases: ['setgname'], category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, text, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    if (!text) return reply(`Usage: ${prefix}setgroupname New Name`);
+    try { await sock.groupUpdateSubject(from, text); return reply(`✅ Group name changed to: ${text}`); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'setdesc', aliases: ['setgroupdesc'], category: 'group',
-  run: async ({ reply, sock, from, isGroup, text }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .setdesc New description');
-    try { await sock.groupUpdateDescription(from, text); return reply(`✅ Desc changed`); } catch(e){ return reply('Bot must be admin'); }
+  name: 'setdesc', aliases: ['setgroupdesc'], category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, text, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    if (!text) return reply(`Usage: ${prefix}setdesc New description`);
+    try { await sock.groupUpdateDescription(from, text); return reply(`✅ Desc changed`); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'open', category: 'group',
-  run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { await sock.groupSettingUpdate(from, 'not_announcement'); return reply('✅ Group OPEN - everybody fit chat'); } catch(e){ return reply('Bot must be admin'); }
+  name: 'open', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    try { await sock.groupSettingUpdate(from, 'not_announcement'); return reply('✅ Group OPEN - everybody fit chat'); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'close', category: 'group',
-  run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { await sock.groupSettingUpdate(from, 'announcement'); return reply('🔒 Group CLOSED - only admins fit chat'); } catch(e){ return reply('Bot must be admin'); }
+  name: 'close', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    try { await sock.groupSettingUpdate(from, 'announcement'); return reply('🔒 Group CLOSED - only admins fit chat'); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'tagall', category: 'group',
-  run: async ({ reply, sock, from, isGroup, text }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'tagall', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, text } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
     let md = await sock.groupMetadata(from);
     let mem = md.participants.map(p=>p.id);
-    let txt = `📢 *TAGALL*\n\n${text || 'Hello everyone!'}\n\n` + mem.map(m=>`@${m.split('@')[0]}`).join(' ');
-    return sock.sendMessage(from, { text: txt, mentions: mem });
+    // REAL: Split into batches of 50 to avoid WhatsApp limit crash
+    let txt = `📢 *TAGALL*\n\n${text || 'Hello everyone!'}\n\n`;
+    for (let i=0; i<mem.length; i+=50) {
+      let batch = mem.slice(i, i+50);
+      let batchTxt = i===0 ? txt + batch.map(m=>`@${m.split('@')[0]}`).join(' ') : batch.map(m=>`@${m.split('@')[0]}`).join(' ');
+      await sock.sendMessage(from, { text: batchTxt, mentions: batch }).catch(()=>{});
+    }
   }
 },
 {
-  name: 'hidetag', category: 'group',
-  run: async ({ reply, sock, from, isGroup, text }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'hidetag', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { sock, from, isGroup, text, reply } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
     let md = await sock.groupMetadata(from);
     let mem = md.participants.map(p=>p.id);
-    return sock.sendMessage(from, { text: text || '👋 Hello', mentions: mem });
+    for (let i=0; i<mem.length; i+=50) {
+      let batch = mem.slice(i, i+50);
+      await sock.sendMessage(from, { text: text || '👋 Hello', mentions: batch }).catch(()=>{});
+    }
+  }
+},
+// ===== REAL MISSING COMMANDS - Kick / Promote / Demote / Remove =====
+{
+  name: 'kick', aliases: ['remove', 'kickout'], category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, m, F, args, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    let target = F.getTarget(m, args);
+    if (!target) return reply(`Reply / tag / number. ${prefix}kick @user`);
+    // No kick admin / owner
+    let md = await sock.groupMetadata(from);
+    let tp = md.participants.find(p=>p.id===target);
+    if (tp?.admin) return reply('❌ Cannot kick admin. Demote first.');
+    try { await sock.groupParticipantsUpdate(from, [target], 'remove'); return reply(`🦶 Kicked @${target.split('@')[0]}`, { mentions: [target] }); } catch(e){ return reply('Kick failed: '+e.message); }
   }
 },
 {
-  name: 'listmembers', aliases: ['members', 'groupmembers'], category: 'group',
+  name: 'promote', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, m, F, args, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    let target = F.getTarget(m, args);
+    if (!target) return reply(`Usage: ${prefix}promote @user`);
+    try { await sock.groupParticipantsUpdate(from, [target], 'promote'); return reply(`👑 Promoted @${target.split('@')[0]} to admin`); } catch(e){ return reply('Promote failed: '+e.message); }
+  }
+},
+{
+  name: 'demote', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, m, F, args, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    let target = F.getTarget(m, args);
+    if (!target) return reply(`Usage: ${prefix}demote @user`);
+    try { await sock.groupParticipantsUpdate(from, [target], 'demote'); return reply(`⬇️ Demoted @${target.split('@')[0]}`); } catch(e){ return reply('Demote failed: '+e.message); }
+  }
+},
+{
+  name: 'mute', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, db, F } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    if (!db.muted) db.muted = {};
+    db.muted[from] = db.muted[from] || [];
+    // Mute = close group
+    await sock.groupSettingUpdate(from, 'announcement').catch(()=>{});
+    save(db, F);
+    return reply('🔇 Group MUTED - only admins fit chat');
+  }
+},
+{
+  name: 'unmute', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    await sock.groupSettingUpdate(from, 'not_announcement').catch(()=>{});
+    return reply('🔊 Group UNMUTED - everybody fit chat');
+  }
+},
+{
+  name: 'listmembers', aliases: ['members', 'groupmembers'], category: 'group', groupOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
+    if (!needGroup(isGroup, reply)) return;
     let md = await sock.groupMetadata(from);
     let txt = `👥 *MEMBERS (${md.participants.length})*\n\n` + md.participants.map((p,i)=>`${i+1}. @${p.id.split('@')[0]} ${p.admin ? '👑' : ''}`).join('\n');
     return sock.sendMessage(from, { text: txt, mentions: md.participants.map(p=>p.id) });
   }
 },
 {
-  name: 'admins', category: 'group',
+  name: 'admins', category: 'group', groupOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
+    if (!needGroup(isGroup, reply)) return;
     let md = await sock.groupMetadata(from);
     let adm = md.participants.filter(p=>p.admin);
     let txt = `👑 *ADMINS (${adm.length})*\n\n` + adm.map((p,i)=>`${i+1}. @${p.id.split('@')[0]}`).join('\n');
@@ -85,125 +198,187 @@ module.exports = [
   }
 },
 {
-  name: 'getpic', aliases: ['grouppic'], category: 'group',
-  run: async ({ reply, sock, from, isGroup, m, F, args }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'getpic', aliases: ['grouppic'], category: 'group', groupOnly: true,
+  run: async ({ reply, sock, from, isGroup, m }) => {
+    if (!needGroup(isGroup, reply)) return;
     try { let url = await sock.profilePictureUrl(from, 'image'); return sock.sendMessage(from, { image: { url }, caption: '🏠 Group Pic' }, { quoted: m }); } catch(e){ return reply('No group pic or failed'); }
   }
 },
 {
-  name: 'setgroup', category: 'group',
-  run: async ({ reply }) => { return reply('Usage: .setgroupname / .setdesc / .setwelcome\n\nExample: .setgroupname META FANS'); }
+  name: 'setgroup', category: 'group', groupOnly: true,
+  run: async ({ reply, prefix }) => { return reply(`Usage: ${prefix}setgroupname / ${prefix}setdesc / ${prefix}setwelcome\n\nExample: ${prefix}setgroupname META FANS`); }
 },
 {
-  name: 'resetlink', aliases: ['revoke'], category: 'group',
-  run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { let code = await sock.groupRevokeInvite(from); return reply(`✅ Link revoked!\nNew link: https://chat.whatsapp.com/${code}`); } catch(e){ return reply('Bot must be admin'); }
+  name: 'resetlink', aliases: ['revoke'], category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    try { let code = await sock.groupRevokeInvite(from); return reply(`✅ Link revoked!\nNew link: https://chat.whatsapp.com/${code}`); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'invite', category: 'group',
-  run: async ({ reply, sock, from, isGroup, m, F, args }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'invite', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, m, F, args, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
     let target = F.getTarget(m, args);
-    if (!target) return reply('Usage: .invite 2348102350169');
+    if (!target) return reply(`Usage: ${prefix}invite 2348102350169`);
     try { await sock.groupAdd(from, [target]); return reply(`✅ Invited @${target.split('@')[0]}`); } catch(e){ return reply('Invite failed: '+e.message+'\nTry .grouplink and send link'); }
   }
 },
 {
-  name: 'accept', category: 'group',
-  run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { let req = await sock.groupRequestParticipantsList(from); if(!req.length) return reply('No pending requests'); for(let r of req) await sock.groupRequestParticipantsUpdate(from, [r.jid], 'approve'); return reply(`✅ Approved ${req.length} requests`); } catch(e){ return reply('Bot must be admin'); }
+  name: 'accept', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    try { let req = await sock.groupRequestParticipantsList(from); if(!req.length) return reply('No pending requests'); for(let r of req) await sock.groupRequestParticipantsUpdate(from, [r.jid], 'approve'); return reply(`✅ Approved ${req.length} requests`); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'reject', category: 'group',
-  run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
-    try { let req = await sock.groupRequestParticipantsList(from); if(!req.length) return reply('No pending requests'); for(let r of req) await sock.groupRequestParticipantsUpdate(from, [r.jid], 'reject'); return reply(`🚫 Rejected ${req.length} requests`); } catch(e){ return reply('Bot must be admin'); }
+  name: 'reject', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!await needBotAdmin(sock, from, reply)) return;
+    try { let req = await sock.groupRequestParticipantsList(from); if(!req.length) return reply('No pending requests'); for(let r of req) await sock.groupRequestParticipantsUpdate(from, [r.jid], 'reject'); return reply(`🚫 Rejected ${req.length} requests`); } catch(e){ return reply('Failed: '+e.message); }
   }
 },
 {
-  name: 'welcome', category: 'group',
-  run: async ({ reply, sock, from, isGroup, args, db }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'welcome', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, args, db, F, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
     if(!db.group) db.group = {}; if(!db.group[from]) db.group[from]={};
     let v = (args[0]||'').toLowerCase(); if(v==='on'||v==='off') db.group[from].welcome = v==='on';
-    return reply(`👋 Welcome is ${db.group[from].welcome ? 'ON ✅' : 'OFF ❌'}\nUsage: .welcome on / off`);
+    save(db, F);
+    return reply(`👋 Welcome is ${db.group[from].welcome ? 'ON ✅' : 'OFF ❌'}\nUsage: ${prefix}welcome on / off`);
   }
 },
 {
-  name: 'goodbye', category: 'group',
-  run: async ({ reply, from, isGroup, args, db }) => {
-    if (!isGroup) return reply('Use in group');
+  name: 'goodbye', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, args, db, F, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
     if(!db.group) db.group = {}; if(!db.group[from]) db.group[from]={};
     let v = (args[0]||'').toLowerCase(); if(v==='on'||v==='off') db.group[from].goodbye = v==='on';
-    return reply(`👋 Goodbye is ${db.group[from].goodbye ? 'ON ✅' : 'OFF ❌'}\nUsage: .goodbye on / off`);
+    save(db, F);
+    return reply(`👋 Goodbye is ${db.group[from].goodbye ? 'ON ✅' : 'OFF ❌'}\nUsage: ${prefix}goodbye on / off`);
   }
 },
 {
-  name: 'setwelcome', category: 'group',
-  run: async ({ reply, from, isGroup, text, db }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .setwelcome Welcome @user to group!');
+  name: 'setwelcome', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, text, db, F, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!text) return reply(`Usage: ${prefix}setwelcome Welcome @user to group!`);
     if(!db.group) db.group={}; if(!db.group[from]) db.group[from]={};
     db.group[from].welcomeMsg = text;
+    save(db, F);
     return reply(`✅ Welcome msg set:\n${text}`);
   }
 },
 {
-  name: 'setgoodbye', category: 'group',
-  run: async ({ reply, from, isGroup, text, db }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .setgoodbye Bye @user 😢');
+  name: 'setgoodbye', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, text, db, F, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!text) return reply(`Usage: ${prefix}setgoodbye Bye @user 😢`);
     if(!db.group) db.group={}; if(!db.group[from]) db.group[from]={};
     db.group[from].goodbyeMsg = text;
+    save(db, F);
     return reply(`✅ Goodbye msg set:\n${text}`);
   }
 },
 {
-  name: 'poll', category: 'group',
-  run: async ({ reply, sock, from, isGroup, text }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .poll Question | Option1 | Option2');
+  name: 'poll', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, text, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!text) return reply(`Usage: ${prefix}poll Question | Option1 | Option2`);
     let parts = text.split('|').map(s=>s.trim()).filter(Boolean);
-    if (parts.length < 3) return reply('Usage: .poll Best player? | Messi | Ronaldo');
+    if (parts.length < 3) return reply(`Usage: ${prefix}poll Best player? | Messi | Ronaldo`);
     try { await sock.sendMessage(from, { poll: { name: parts[0], values: parts.slice(1), selectableCount: 1 } }); } catch(e){ return reply('Poll failed: '+e.message); }
   }
 },
 {
-  name: 'vote', category: 'group',
-  run: async ({ reply }) => { return reply('🗳️ To vote, tap option for poll above.\nCreate poll: .poll Question | Yes | No'); }
+  name: 'vote', category: 'group', groupOnly: true,
+  run: async ({ reply, prefix }) => { return reply(`🗳️ To vote, tap option for poll above.\nCreate poll: ${prefix}poll Question | Yes | No`); }
 },
 {
-  name: 'endpoll', category: 'group',
+  name: 'endpoll', category: 'group', groupOnly: true,
   run: async ({ reply }) => { return reply('Poll go end by itself. Or delete poll message.'); }
 },
 {
-  name: 'groupid', category: 'group',
+  name: 'groupid', category: 'group', groupOnly: true,
   run: async ({ reply, from, isGroup }) => {
-    if (!isGroup) return reply('Use in group');
+    if (!needGroup(isGroup, reply)) return;
     return reply(`🆔 Group ID:\n${from}`);
   }
 },
 {
-  name: 'setrules', category: 'group',
-  run: async ({ reply, from, isGroup, text, db }) => {
-    if (!isGroup) return reply('Use in group');
-    if (!text) return reply('Usage: .setrules 1. No spam 2. Respect all');
+  name: 'setrules', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, text, db, F, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    if (!text) return reply(`Usage: ${prefix}setrules 1. No spam 2. Respect all`);
     if(!db.group) db.group={}; if(!db.group[from]) db.group[from]={};
     db.group[from].rules = text;
+    save(db, F);
     return reply(`✅ Rules set!`);
   }
 },
 {
-  name: 'rules', aliases: ['getrules'], category: 'group',
+  name: 'rules', aliases: ['getrules'], category: 'group', groupOnly: true,
   run: async ({ reply, from, isGroup, db }) => {
-    if (!isGroup) return reply('Use in group');
+    if (!needGroup(isGroup, reply)) return;
     let r = db.group?.[from]?.rules;
     return reply(r ? `📜 *GROUP RULES*\n\n${r}` : 'No rules set. Admin use .setrules');
+  }
+},
+{
+  name: 'warn', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, sock, from, isGroup, m, F, args, db, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    let target = F.getTarget(m, args);
+    if (!target) return reply(`Usage: ${prefix}warn @user`);
+    if (!db.warns) db.warns = {};
+    if (!db.warns[from]) db.warns[from] = {};
+    db.warns[from][target] = (db.warns[from][target] || 0) + 1;
+    let count = db.warns[from][target];
+    save(db, F);
+    if (count >= 3) {
+      db.warns[from][target] = 0; save(db, F);
+      await sock.groupParticipantsUpdate(from, [target], 'remove').catch(()=>{});
+      return reply(`🦶 @${target.split('@')[0]} kicked - 3/3 warnings`);
+    }
+    return reply(`⚠️ Warned @${target.split('@')[0]} - ${count}/3`);
+  }
+},
+{
+  name: 'unwarn', category: 'group', groupOnly: true,
+  run: async (ctx) => {
+    let { reply, from, isGroup, m, F, args, db, prefix } = ctx;
+    if (!needGroup(isGroup, reply)) return;
+    if (!needAdmin(ctx)) return;
+    let target = F.getTarget(m, args);
+    if (!target) return reply(`Usage: ${prefix}unwarn @user`);
+    if (db.warns?.[from]) db.warns[from][target] = 0;
+    save(db, F);
+    return reply(`✅ Unwarned @${target.split('@')[0]}`);
   }
 },
 ];
