@@ -1,4 +1,4 @@
-// index.js - META AI MD - BY SIMON TECH
+// index.js - META AI MD - FIXED - BY SIMON TECH
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -13,83 +13,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 const PORT = config.port || 10000;
 let sock = null;
-let db = F.loadDB(config);
+let db = F.loadDB();
 let isStarting = false;
 let reconnectTimer = null;
-
-// ===== Cached groupMetadata - Bot fast, no double call =====
-let metaCache = new Map(); // gid -> { meta, time }
-async function getGroupMeta(gid){
-  if (!gid || !gid.endsWith('@g.us')) return null;
-  let cached = metaCache.get(gid);
-  if (cached && Date.now() - cached.time < 30000) return cached.meta;
-  try {
-    let meta = await sock.groupMetadata(gid);
-    metaCache.set(gid, { meta, time: Date.now() });
-    return meta;
-  } catch(e){ return cached?.meta || null; }
-}
-function clearMetaCache(gid){ if (gid) metaCache.delete(gid); else metaCache.clear(); }
-// Find participant by LID OR PN - shared helper for all plugins
-function findParticipant(meta, uid){
-  if (!meta || !uid) return null;
-  let num = String(uid).split('@')[0].replace(/[^0-9]/g, '');
-  return (meta.participants || []).find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
-}
-// Display PN, not LID - for @mentions in text
-function displayNum(meta, uid){
-  if (!uid) return '';
-  let p = meta ? findParticipant(meta, uid) : null;
-  if (p?.phoneNumber) return String(p.phoneNumber).split('@')[0].replace(/[^0-9]/g, '');
-  return String(uid).split('@')[0].replace(/[^0-9]/g, '');
-}
-
-// ===== STRONG OWNER CHECK - Owner = person who paired the bot =====
-function isOwnerCheck(sender, senderPn, db){
-  let nums = [];
-  if (sender) nums.push(String(sender).split('@')[0].replace(/[^0-9]/g, ''));
-  if (senderPn) nums.push(String(senderPn).split('@')[0].replace(/[^0-9]/g, ''));
-  let owners = [];
-  if(config.ownerNumber) owners.push(String(config.ownerNumber).replace(/[^0-9]/g, ''));
-  if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
-  if(db.settings?.owner) owners.push(String(db.settings.owner).replace(/[^0-9]/g, ''));
-  if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  return nums.some(n => n && owners.includes(n));
-}
-// Admin check - uses cached meta
-async function isAdminCheck(from, sender, senderPn){
-  try {
-    let meta = await getGroupMeta(from);
-    if (!meta) return false;
-    let p = findParticipant(meta, sender) || (senderPn ? findParticipant(meta, senderPn) : null);
-    return !!(p && (p.admin === 'admin' || p.admin === 'superadmin'));
-  } catch(e){ return false; }
-}
-async function isBotAdminCheck(from){
-  try {
-    let meta = await getGroupMeta(from);
-    if (!meta || !sock?.user?.id) return false;
-    let myNum = String(sock.user.id).split(':')[0].replace(/[^0-9]/g, '');
-    let myPn = sock.user.id;
-    let myLid = String(sock.user.lid || '').split('@')[0].replace(/[^0-9]/g, '');
-    let me = (meta.participants || []).find(x => x.id === myPn || x.phoneNumber === myPn || String(x.phoneNumber || '').split('@')[0] === myNum || String(x.id || '').split('@')[0] === myNum || (myLid && String(x.id || '').split('@')[0] === myLid));
-    return !!(me && (me.admin === 'admin' || me.admin === 'superadmin'));
-  } catch(e){ return false; }
-}
-function getMode(db){
-  // DB FIRST - ,mode private/public must win. Config is only default for first start.
-  if(db.settings?.mode) return db.settings.mode;
-  if(db.mode) return db.mode;
-  if(db.settings?.self) return 'private';
-  if(config?.forceConfigMode && config?.mode) return config.mode;
-  return config?.mode || 'public';
-}
-function getPrefix(db){
-  if(db.settings?.prefix) return db.settings.prefix;
-  if(config?.forceConfigPrefix && config?.prefix) return config.prefix;
-  return config?.prefix || '.';
-}
 
 // ===== FANCY BOLD FONT =====
 function fancy(text){
@@ -98,32 +24,14 @@ function fancy(text){
 }
 F.fancy = fancy;
 F.bold = fancy;
-F.getGroupMeta = getGroupMeta;
-F.findParticipant = findParticipant;
-F.displayNum = displayNum;
-F.isAdminCheck = isAdminCheck;
-F.isBotAdminCheck = isBotAdminCheck;
-F.getMode = getMode;
-F.getPrefix = getPrefix;
 
-// ===== REACTION: Await / Complete =====
-async function reactAwait(m){
-  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '⏳', key: m.key } }); } catch(e){}
-}
-async function reactDone(m){
-  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '✅', key: m.key } }); } catch(e){}
-}
-F.reactAwait = reactAwait;
-F.reactDone = reactDone;
-
-// ===== LOAD PLUGINS - SUPPORTS ARRAY + FUNCTION =====
-let antiMod = null, autoMod = null, protectionMod = null;
+// ===== LOAD PLUGINS - FIXED: SUPPORTS ARRAY + FUNCTION =====
+let antiMod = null, autoMod = null;
 try{ antiMod = require('./plugins/anti.js'); }catch(e){}
 try{ autoMod = require('./plugins/auto.js'); }catch(e){}
-try{ protectionMod = require('./plugins/protection.js'); }catch(e){}
 
 let commands = new Map();
-let functionPlugins = [];
+let functionPlugins = []; // <-- NEW: for owner.js, fun.js, game.js, text.js
 
 function loadPlugins(){
   commands.clear();
@@ -131,7 +39,7 @@ function loadPlugins(){
   let dir = path.join(__dirname, 'plugins');
   if(!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'test.js'), `module.exports = [{ name: 'testping', run: async ({reply}) => reply('✅ Loader is working!') }];`);
+    fs.writeFileSync(path.join(dir, 'test.js'), `module.exports = [{ name: 'testping', run: async ({reply}) => reply('✅ Loader dey work!') }];`);
   }
   let files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
   console.log('📁 Found files in plugins/:', files);
@@ -140,16 +48,20 @@ function loadPlugins(){
       let full = path.join(dir, file);
       delete require.cache[require.resolve(full)];
       let plugin = require(full);
+
+      // CASE 1: FUNCTION plugin - owner.js, fun.js, game.js, text.js
       if(typeof plugin === 'function'){
         functionPlugins.push({ file, fn: plugin });
         console.log(`✅ Loaded FUNCTION ${file}`);
         continue;
       }
+      // CASE 2: Object with handler
       if(plugin && typeof plugin.handler === 'function'){
         functionPlugins.push({ file, fn: plugin.handler });
         console.log(`✅ Loaded HANDLER ${file}`);
         continue;
       }
+      // CASE 3: ARRAY plugin - missing.js etc
       let list = [];
       if(Array.isArray(plugin)) list = plugin;
       else if(plugin && Array.isArray(plugin.plugins)) list = plugin.plugins;
@@ -160,11 +72,8 @@ function loadPlugins(){
       }
       for(let p of list){
         if(!p || !p.name || typeof p.run !== 'function') continue;
-        if (commands.has(p.name.toLowerCase())) console.log(`⚠️ Duplicate command ${p.name} in ${file} - keeping first, skipping this one`);
-        else {
-          commands.set(p.name.toLowerCase(), p);
-          if(p.aliases) for(let a of p.aliases) if(!commands.has(a.toLowerCase())) commands.set(a.toLowerCase(), p);
-        }
+        commands.set(p.name.toLowerCase(), p);
+        if(p.aliases) for(let a of p.aliases) commands.set(a.toLowerCase(), p);
       }
       console.log(`✅ Loaded ${file} - ${list.length} cmds`);
     }catch(e){ console.log('❌ Plugin failed:', file, e.message); }
@@ -172,12 +81,11 @@ function loadPlugins(){
   console.log(`Total array commands: ${commands.size} | Function plugins: ${functionPlugins.length}`);
   try{ antiMod = require('./plugins/anti.js'); }catch(e){}
   try{ autoMod = require('./plugins/auto.js'); }catch(e){}
-  try{ protectionMod = require('./plugins/protection.js'); }catch(e){}
 }
 loadPlugins();
 
 // ===== EXPRESS + KEEPALIVE =====
-app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(db) }));
+app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length }));
 app.get('/ping', (req,res)=> res.send('pong'));
 app.get('/pair', async (req,res)=>{
   try{
@@ -255,58 +163,41 @@ async function start(){
       if(connection === 'open'){
         isStarting = false;
         console.log('META AI MD CONNECTED ✅');
-        try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db, config); }catch(e){}
+        try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){}
       }
     });
 
-    // ===== STATUS - BLOCKED IN PRIVATE =====
     sock.ev.on('messages.upsert', async ({ messages }) => {
       try {
         if (messages[0]?.key?.remoteJid === 'status@broadcast') {
-          if(getMode(db) === 'private') return;
-          if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db, F, config);
+          if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
         }
       } catch(e){}
     });
 
-    // ===== GROUP JOIN/LEAVE - BLOCKED IN PRIVATE =====
     sock.ev.on('group-participants.update', async (u) => {
       try {
-        if(getMode(db) === 'private') return;
-        clearMetaCache(u.id);
         let from = u.id;
         let g = db.group?.[from];
         if (!g) return;
-        // Use cached meta for PN display - avoid LID in welcome/goodbye
-        let meta = await getGroupMeta(from).catch(()=>null);
         for (let p of u.participants) {
-          let pnNum = displayNum(meta, p);
           if (u.action === 'add' && (g.welcome || db.auto?.autowelcome)) {
-            let msg = (g.welcomeMsg || '👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g, `@${pnNum}`).replace(/\{group\}/g, u.subject || 'group');
+            let msg = (g.welcomeMsg || '👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g, `@${p.split('@')[0]}`).replace(/\{group\}/g, u.subject || 'group');
             await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'remove' && (g.goodbye || db.auto?.autogoodbye)) {
-            let msg = (g.goodbyeMsg || '👋 Goodbye @user, we will miss you').replace(/@user/g, `@${pnNum}`);
+            let msg = (g.goodbyeMsg || '👋 Bye @user, we go miss you 😢').replace(/@user/g, `@${p.split('@')[0]}`);
             await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'promote' && db.anti?.antipromote) {
             await sock.groupParticipantsUpdate(from, [p], 'demote').catch(()=>{});
-            await sock.sendMessage(from, { text: `🚫 Anti-Promote: @${pnNum} demoted back`, mentions: [p] }).catch(()=>{});
+            await sock.sendMessage(from, { text: `🚫 Anti-Promote: @${p.split('@')[0]} demoted back`, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'demote' && db.anti?.antidemote) {
             await sock.groupParticipantsUpdate(from, [p], 'promote').catch(()=>{});
-            await sock.sendMessage(from, { text: `✅ Anti-Demote: @${pnNum} promoted back`, mentions: [p] }).catch(()=>{});
+            await sock.sendMessage(from, { text: `✅ Anti-Demote: @${p.split('@')[0]} promoted back`, mentions: [p] }).catch(()=>{});
           }
         }
-      } catch(e){}
-    });
-
-    // ===== ANTI DELETE - via protection.js =====
-    sock.ev.on('messages.update', async (updates) => {
-      try {
-        if (getMode(db) === 'private') return;
-        clearMetaCache(updates?.[0]?.key?.remoteJid);
-        if (protectionMod?.handleAntiDelete) await protectionMod.handleAntiDelete(sock, updates, db, F);
       } catch(e){}
     });
 
@@ -316,140 +207,83 @@ async function start(){
         if (m.key.remoteJid === 'status@broadcast') continue;
         let from = m.key.remoteJid;
         let sender = m.key.participant || m.key.remoteJid;
-        let senderPn = m.key.participantPn || m.key.remoteJidAlt || '';
-        let senderNum = (senderPn || sender).split('@')[0];
+        let senderNum = sender.split('@')[0];
         let pushname = m.pushName || 'User';
         let body = F.getText(m);
         if(!body) continue;
         console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
         let isGroup = F.isGroup(from);
-
-        // ===== STRONG OWNER CHECK - BEFORE EVERYTHING =====
-        let isOwner = isOwnerCheck(sender, senderPn, db);
+        let isOwner = F.isOwner(sender, db);
         let isSelfCommand = false;
         if(m.key.fromMe){
-          let hasPrefix = (config.prefixes || [getPrefix(db)]).some(p => body.startsWith(p));
+          let hasPrefix = config.prefixes.some(p => body.startsWith(p));
           if(!hasPrefix) continue;
           isSelfCommand = true;
           isOwner = true;
           console.log('✅ Self-command detected, treating as owner');
         }
-
-        // ===== PRIVATE MODE - BLOCK EVERYTHING FIRST =====
-        // Private: Owner = reply, Non-owner = IGNORE silent - NO reply, NO reaction
-        // Public: Everyone = reply
-        let mode = getMode(db);
-        if(mode === 'private' && !isOwner){
-          console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
-          continue;
-        }
-
-        // Banned check - check both LID and PN forms
         if (db.banned?.includes(senderNum) && !isOwner) continue;
-        if (db.banned?.includes(sender.split('@')[0]) && !isOwner) continue;
         if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
           try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
           continue;
         }
         if(!isSelfCommand){
-          // Protection FIRST, then Anti - protection returns true = blocked, no double-warn
-          try { if (protectionMod?.handleProtection) { let blocked = await protectionMod.handleProtection(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){ console.log('Protection err:', e.message); }
-          try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
-          try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db, F, config); } catch(e){}
+          try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
+          try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
           if (db.auto?.autoforward && !isOwner) {
-            try {
-              let pn = senderPn || sender;
-              let pnNum = String(pn).split('@')[0];
-              await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${pnNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [pn] });
-            } catch(e){}
+            try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
           }
         }
-        let usedPrefix = (config.prefixes || [getPrefix(db)]).find(p => body.startsWith(p));
+        let usedPrefix = config.prefixes.find(p => body.startsWith(p));
         if(!usedPrefix) continue;
         let args = body.slice(usedPrefix.length).trim().split(/ +/);
         let cmdName = (args.shift()||'').toLowerCase();
         let text = args.join(' ');
-        // Compute isAdmin ONCE with cached meta - pass to all plugins
-        let isAdmin = false;
-        let isBotAdmin = false;
-        if (isGroup) {
-          isAdmin = await isAdminCheck(from, sender, senderPn);
-          isBotAdmin = await isBotAdminCheck(from);
-        }
+        if(db.settings?.mode === 'private' && !isOwner) continue;
         const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
         const fancyReply = async (t, opts={}) => sock.sendMessage(from, { text: fancy(t) }, { quoted: m, ...opts });
         if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
-          await reactAwait(m);
           try{
             let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting });
-            await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
-            await reactDone(m);
-            continue;
-          }catch(e){ await reactDone(m); await reply('Menu error: '+e.message); continue; }
+            return await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
+          }catch(e){ return await reply('Menu error: '+e.message); }
         }
-        if(cmdName === 'reload' && isOwner){ await reactAwait(m); loadPlugins(); await reactDone(m); await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); continue; }
+        if(cmdName === 'reload' && isOwner){ loadPlugins(); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
 
-        let ctx = { sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant, displayNum };
-              // Protection commands (antilink on/off etc) - handle BEFORE functionPlugins
-        try {
-          if (protectionMod?.handleCommands) {
-            let handledProt = await protectionMod.handleCommands(sock, m, ctx);
-            if (handledProt) { F.saveDB(db); continue; }
-          }
-        } catch(e){ console.log('Protection cmd err:', e.message); }
-
-        // ===== REMAINING ONES - AFTER PROTECTION COMMANDS =====
-
-        // 1. Function plugins - e.g. plugins that export a function, not array
+        // ===== FIXED: TRY FUNCTION PLUGINS FIRST (owner, fun, game, text) =====
+        let ctx = { sock, m, from, sender, senderNum, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply };
         let handled = false;
         for(let fp of functionPlugins){
           try{
-            await reactAwait(m);
             let r = await Promise.race([
               fp.fn(sock, m, ctx),
               new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
             ]);
-            if(r){ handled = true; await reactDone(m); F.saveDB(db); break; }
+            if(r){ handled = true; F.saveDB(db); break; }
           }catch(e){
+            // function plugin no handle am or error - try next, no crash
             if(e.message !== 'timeout') console.log('FUNC PLUGIN ERR', fp.file, cmdName, e.message);
           }
         }
         if(handled) continue;
 
-        // 2. Array plugins - normal commands from plugins/*.js
+        // ===== THEN ARRAY PLUGINS (missing.js etc) =====
         let plugin = commands.get(cmdName);
-        if(!plugin) { await reply(`❌ ${fancy('Unknown command:')} ${usedPrefix}${cmdName}\n${fancy('Type')} ${usedPrefix}menu\n\n${config.footer}`); continue; }
-        if(plugin.ownerOnly && !isOwner) { await reply(config.messages.ownerOnly); continue; }
-        if(plugin.groupOnly && !isGroup) { await reply(config.messages.groupOnly); continue; }
-
-        // 3. Reaction Await -> Complete for every command
-        await reactAwait(m);
+        if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
+        if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
+        if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
         try{
           await Promise.race([
-            plugin.run({ sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant, displayNum }),
-            new Promise((_,rej)=>setTimeout(()=>rej(new Error('Command timeout')), 15000))
+            plugin.run({ sock, m, from, sender, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply }),
+            new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
           ]);
-          await reactDone(m);
           F.saveDB(db);
-        }catch(e){
-          console.log('CMD ERR', cmdName, e.message);
-          await reactDone(m);
-          if (e.message === 'Command timeout') await reply('⏳ Command timed out. Try again.');
-          else await reply(`❌ Error: ${e.message}`);
-        }
+        }catch(e){ console.log('CMD ERR', cmdName, e.message); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
       }
     });
-
-  }catch(e){
-    console.log('Start error:', e.message);
-    isStarting = false;
-    if(!reconnectTimer){
-      reconnectTimer = setTimeout(()=>{ reconnectTimer = null; start(); }, 5000);
-    }
-  }
+  }catch(e){ console.log('Start failed', e.message); isStarting = false; reconnectTimer = setTimeout(()=>{ reconnectTimer=null; start(); }, 3000); }
 }
-
-process.on('unhandledRejection', (e) => console.log('Unhandled:', e?.message || e));
-process.on('uncaughtException', (e) => console.log('Uncaught:', e?.message || e));
-
 start();
+
+process.on('uncaughtException', e=>console.log('Uncaught:', e.message));
+process.on('unhandledRejection', e=>console.log('Rejection:', e.message));
