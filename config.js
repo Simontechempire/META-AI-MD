@@ -1,5 +1,9 @@
-// config.js - META AI MD by Simon Tech / META
-// Re-edited - Clean + Complete - PRIVATE FIXED
+// config.js - META AI MD by Simon Tech
+// Owner number / LID are set via Environment Variables - do NOT hardcode them here
+// Render -> Environment -> OWNER_NUMBER, OWNER_LID, SESSION_ID
+
+const OWNER_NUMBER = String(process.env.OWNER_NUMBER || '').replace(/[^0-9]/g, '');
+const OWNER_LID = String(process.env.OWNER_LID || '').replace(/[^0-9]/g, '');
 
 module.exports = {
   // ===== BOT INFO =====
@@ -7,45 +11,45 @@ module.exports = {
   botNameShort: 'META',
   ownerName: 'META',
   ownerAlias: 'Simon Tech',
-  ownerNumber: '2348102350169', // +234 810 235 0169 - no + , no space
-  owners: ['2348102350169'], // Phone numbers only - person wey pair the bot = MAIN OWNER
-  ownerLids: ['23223458631686'], // LID of owner - for LID match ONLY, no be phone number
-  ownerJid: '2348102350169@s.whatsapp.net',
-  botNumber: '', // auto-filled after pairing, leave empty
+  ownerNumber: OWNER_NUMBER, // Set in Render Env Vars - e.g. 2348102350169
+  owners: OWNER_NUMBER ? [OWNER_NUMBER] : [], // Phone numbers only - person who paired the bot = MAIN OWNER
+  ownerLids: OWNER_LID ? [OWNER_LID] : [], // LID of owner - for LID match only
+  ownerJid: OWNER_NUMBER ? `${OWNER_NUMBER}@s.whatsapp.net` : '',
+  botNumber: '', // Auto-filled after pairing, leave empty
 
   // ===== PREFIX =====
-  // Bot go answer to ALL of these
-  prefixes: ['.', ',', '!', '?', '@', '-', '/'],
+  // Bot responds to all of these
+  prefixes: ['.', ',', '!', '?', '/'],
   prefix: '.',
 
   // ===== STYLE / FOOTER / FANCY / REACTION =====
-  footer: '©️ created by Simon tech inc',
-  header: '◈┈▉ `ᴍᴇᴛᴀ ᴀɪ ᴍᴅ` ▉┄◈',
+  footer: '©️ Created by Simon Tech Inc',
+  header: '◈┈▉ `META AI MD` ▉┄◈',
   botPfp: 'https://files.catbox.moe/hhafg3.jpg',
   thumb: 'https://files.catbox.moe/hhafg3.jpg',
   menuPfp: 'https://i.postimg.cc/GmSz8cDT/IMG-20261105-WA0073.jpg',
   alivePfp: 'https://files.catbox.moe/hhafg3.jpg',
-  fancy: true, // Fancy Bold keyboard style ON - F.fancy() / F.bold()
-  reaction: { await: '⏳', done: '💀' }, // Await ⏳ when action dey execute, Complete 💀 when action complete
+  fancy: true, // Fancy Bold style ON - F.fancy() / F.bold()
+  reaction: { await: '⏳', done: '✅' }, // Await when action is running, Done when action completes
 
   // ===== SESSION / PAIRING =====
   sessionName: 'Meta',
   sessionFolder: './Meta',
-  sessionId: process.env.SESSION_ID || '', // paste your session id here if you get one
+  sessionId: process.env.SESSION_ID || '',
   pairing: true, // true = use pairing code, false = QR
-  pairingNumber: '2348102350169', // number wey go receive pairing code
+  pairingNumber: OWNER_NUMBER, // Number that receives pairing code
 
   // ===== MODE / SETTINGS =====
-  // IMPORTANT: This na DEFAULT for FIRST START ONLY - no be force again.
-  // DB (database.json) na truth after first start. ,mode public / ,mode private go win + survive restart.
-  // 'private' = only owner (2348102350169 - person wey pair bot) fit use bot, isOwner ❌ = IGNORE silent
-  // 'public' = everybody fit use bot, Owner & isOwner ✅ = reply
-  // If you want make bot ALWAYS start private after Render restart, delete database.json before restart.
+  // This is DEFAULT for FIRST START ONLY.
+  // DB (database.json) is truth after first start. .mode public / .mode private wins + survives restart.
+  // 'private' = only owner can use bot, non-owner = IGNORE silent
+  // 'public' = everyone can use bot
+  // To force bot to start private after Render restart, delete database.json before restart.
   mode: 'private',
-  forceConfigMode: false, // FIXED: Was true - e dey force private forever, ,mode public never work. Now false = DB wins.
-  forceConfigPrefix: false, // FIXED: Was true - e dey reset ,setprefix after restart. Now false = DB wins.
+  forceConfigMode: false, // Was true - forced private forever, .mode public never worked. Now false = DB wins.
+  forceConfigPrefix: false, // Was true - reset .setprefix after restart. Now false = DB wins.
   language: 'en',
-  timezone: 'Africa/Lagos',
+  timezone: process.env.TZ || 'UTC',
   totalCmds: 300,
   warnLimit: 3, // 3 warns = kick
   deleteAfterWarn: true,
@@ -53,13 +57,13 @@ module.exports = {
   // ===== HOSTING =====
   hosting: 'Render',
   port: process.env.PORT || 10000,
-  appUrl: process.env.APP_URL || '', // e.g https://meta-ai-md.onrender.com
+  appUrl: process.env.APP_URL || '',
 
   // ===== LINKS =====
   repo: 'https://github.com/SimonTech/META-AI-MD',
-  channel: 'https://whatsapp.com/channel/0029Vb...', // put your channel
-  group: 'https://chat.whatsapp.com/...', // put your group
-  support: 'https://wa.me/2348102350169',
+  channel: '', // Put your real channel link here
+  group: '', // Put your real group link here
+  support: OWNER_NUMBER ? `https://wa.me/${OWNER_NUMBER}` : '',
 
   // ===== AUTO DEFAULTS (all OFF by default) =====
   auto: {
@@ -70,7 +74,7 @@ module.exports = {
     autoreact: false,
     autoreply: false,
     autosticker: false,
-    autoview: false, // autoview status
+    autoview: false,
     autobio: false,
     autolikestatus: false,
     autodownload: false,
@@ -85,10 +89,10 @@ module.exports = {
   },
 
   // ===== ANTI / PROTECTION DEFAULTS =====
-  // All OFF by default - Admin go turn ON with .antigroupstatus on etc
+  // All OFF by default - Admins turn ON with .antilink on etc
   anti: {
-    antigroupstatus: false, // mention/tag for status - delete + warn
-    antigcstatus: false,    // share group status if not admin - delete + warn
+    antigroupstatus: false,
+    antigcstatus: false,
     antilink: false,
     antibadword: false,
     antisticker: false,
@@ -117,7 +121,7 @@ module.exports = {
     warn1: '⚠️ Warning 1/3 - Message Deleted',
     warn2: '⚠️ Warning 2/3 - One More = Kick',
     warn3: '🦶 Kicked - 3/3 Violations',
-    adminBypass: true, // admins no go chop warn
+    adminBypass: true, // Admins do not get warnings
     botMustBeAdminToKick: true,
   },
 
@@ -128,7 +132,7 @@ module.exports = {
   },
   goodbye: {
     enabled: false,
-    text: '👋 Bye @user, we go miss you 😭\n> META AI MD',
+    text: '👋 Goodbye @user, we will miss you\n> META AI MD',
   },
 
   // ===== MESSAGES =====
@@ -146,7 +150,7 @@ module.exports = {
     wait: '⏳ Processing...',
     success: '✅ Done!',
     notFound: '❌ Not found.',
-    noPerm: '❌ You no get permission.',
+    noPerm: '❌ You do not have permission.',
     warn: '⚠️ Warning',
     kicked: '🦶 Kicked for breaking rules',
   },
