@@ -13,7 +13,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 const PORT = config.port || 10000;
 let sock = null;
-let db = F.loadDB();
+let db = F.loadDB(config);
 let isStarting = false;
 let reconnectTimer = null;
 
@@ -30,11 +30,13 @@ function isOwnerCheck(sender, db){
   return owners.includes(num);
 }
 function getMode(db){
+  // FIXED: Respect config.js forceConfigMode - config must win over old DB
+  if(config?.forceConfigMode && config?.mode) return config.mode;
   // Check all places where mode fit dey - private fit dey for different key
   if(db.settings?.mode) return db.settings.mode;
   if(db.mode) return db.mode;
   if(db.settings?.self) return 'private';
-  return 'public';
+  return config?.mode || 'public';
 }
 
 // ===== FANCY BOLD FONT =====
