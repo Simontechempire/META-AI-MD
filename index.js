@@ -25,16 +25,24 @@ function isOwnerCheck(sender, db){
   if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
   if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
   if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  // Also try F.isOwner if e work
   try{ if(F.isOwner && F.isOwner(sender, db)) return true; }catch(e){}
   return owners.includes(num);
 }
+
+// ===== FIXED: GET MODE + GET PREFIX =====
 function getMode(db){
-  // Check all places where mode fit dey - private fit dey for different key
+  // db.settings.mode na temporary from ,private / ,public command - e go win
+  // If db empty, use config.js mode - NO more default public
   if(db.settings?.mode) return db.settings.mode;
   if(db.mode) return db.mode;
   if(db.settings?.self) return 'private';
-  return 'public';
+  return config.mode || 'private';
+}
+function getPrefix(db){
+  // db.settings.prefix na from ,setprefix - e go win
+  // If db empty, use config.js prefix - only ONE prefix
+  if(db.settings?.prefix) return db.settings.prefix;
+  return config.prefix || ',';
 }
 
 // ===== FANCY BOLD FONT =====
@@ -101,7 +109,7 @@ function loadPlugins(){
 loadPlugins();
 
 // ===== EXPRESS + KEEPALIVE =====
-app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(db) }));
+app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(db), prefix: getPrefix(db) }));
 app.get('/ping', (req,res)=> res.send('pong'));
 app.get('/pair', async (req,res)=>{
   try{
@@ -202,7 +210,8 @@ async function start(){
         if (!g) return;
         for (let p of u.participants) {
           if (u.action === 'add' && (g.welcome || db.auto?.autowelcome)) {
-            let msg = (g.welcomeMsg || '👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g, `@${p.split('@')[0]}`).replace(/\{group\}/g, u.subject || 'group');
+            let activeP = getPrefix(db);
+            let msg = (g.welcomeMsg || `👋 Welcome @user to *{group}*!\n\nType ${activeP}menu`).replace(/@user/g, `@${p.split('@')[0]}`).replace(/\{group\}/g, u.subject || 'group');
             await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'remove' && (g.goodbye || db.auto?.autogoodbye)) {
@@ -237,8 +246,9 @@ async function start(){
         // ===== FIX 1: STRONG OWNER CHECK - BEFORE EVERYTHING =====
         let isOwner = isOwnerCheck(sender, db);
         let isSelfCommand = false;
+        let activePrefix = getPrefix(db);
         if(m.key.fromMe){
-          let hasPrefix = config.prefixes.some(p => body.startsWith(p));
+          let hasPrefix = body.startsWith(activePrefix);
           if(!hasPrefix) continue;
           isSelfCommand = true;
           isOwner = true;
@@ -246,8 +256,6 @@ async function start(){
         }
 
         // ===== FIX 2: PRIVATE MODE - BLOCK EVERYTHING FIRST =====
-        // This MUST be before anti, auto, forward, menu, plugins
-        // If na private and no be owner, bot go silent - NO reply at all
         let mode = getMode(db);
         if(mode === 'private' && !isOwner){
           console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
@@ -266,12 +274,12 @@ async function start(){
             try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
           }
         }
-        let usedPrefix = config.prefixes.find(p => body.startsWith(p));
-        if(!usedPrefix) continue;
+        // ===== FIX 3: SINGLE PREFIX ONLY =====
+        let usedPrefix = activePrefix;
+        if(!body.startsWith(usedPrefix)) continue;
         let args = body.slice(usedPrefix.length).trim().split(/ +/);
         let cmdName = (args.shift()||'').toLowerCase();
         let text = args.join(' ');
-        // No second private check here - already blocked for top
         const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
         const fancyReply = async (t, opts={}) => sock.sendMessage(from, { text: fancy(t) }, { quoted: m, ...opts });
         if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
@@ -298,7 +306,7 @@ async function start(){
         if(handled) continue;
 
         let plugin = commands.get(cmdName);
-        if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
+        if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} ${usedPrefix}${cmdName}\n${fancy('Type')} ${usedPrefix}menu\n\n${config.footer}`);
         if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
         if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
         try{
