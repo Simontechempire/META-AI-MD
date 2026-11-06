@@ -1,149 +1,633 @@
-// plugins/missing.js - FIXED - NO LONG LINE
+const getTarget = (m, args = []) => {
+    const ctx = m.message?.extendedTextMessage?.contextInfo;
+    const mentioned = ctx?.mentionedJid?.[0];
+
+    if (mentioned) return mentioned;
+
+    const quoted = ctx?.participant;
+    if (quoted) return quoted;
+
+    const number = args[0]?.replace(/[^0-9]/g, '');
+    return number ? `${number}@s.whatsapp.net` : null;
+};
+
+const safe = async (reply, action, success) => {
+    try {
+        const result = await action();
+        return reply(success(result));
+    } catch (error) {
+        console.error('[META AI CMD]', error);
+        return reply(`❌ Failed: ${error.message}`);
+    }
+};
+
+const setStatus = async (reply, db, F, category, name, args) => {
+    db[category] = db[category] || {};
+
+    const value = args[0]?.toLowerCase();
+
+    if (!['on', 'off'].includes(value)) {
+        return reply(`Usage: .${name} on/off`);
+    }
+
+    db[category][name] = value === 'on';
+
+    await F.saveDB(db);
+
+    return reply(`✅ ${name}: ${value.toUpperCase()}`);
+};
+
 module.exports = [
-  { name: 'alive', run: async ({reply, config}) => reply(`✅ *${config.botName} IS ALIVE!*`) },
-  { name: 'setprefix', run: async ({reply, args, db, F}) => { if(!args[0]) return reply('Usage: .setprefix <new prefix>'); db.settings = db.settings || {}; db.settings.prefix = args[0]; F.saveDB(db); return reply(`✅ Prefix changed to: ${args[0]}`); }, ownerOnly: true },
-  { name: 'join', run: async ({reply, args, sock}) => { if(!args[0]) return reply('Usage: .join <group link>'); try{ let code = args[0].split('/').pop(); await sock.groupAcceptInvite(code); return reply('✅ Joined group!'); }catch(e){ return reply('❌ Failed: '+e.message); } }, ownerOnly: true },
-  { name: 'leave', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Use in group'); await reply('👋 Bye!'); await sock.groupLeave(from); }, ownerOnly: true },
-  { name: 'block', run: async ({reply, args, sock}) => { if(!args[0]) return reply('Usage: .block <number>'); let jid = args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'; await sock.updateBlockStatus(jid, 'block'); return reply('✅ Blocked '+args[0]); }, ownerOnly: true },
-  { name: 'unblock', run: async ({reply, args, sock}) => { if(!args[0]) return reply('Usage: .unblock <number>'); let jid = args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'; await sock.updateBlockStatus(jid, 'unblock'); return reply('✅ Unblocked '+args[0]); }, ownerOnly: true },
-  { name: 'getsession', run: async ({reply}) => reply('⚠️ Session dey for Meta folder on Render.') },
-  { name: 'setowner', run: async ({reply, args, db, F}) => { if(!args[0]) return reply('Usage: .setowner <number>'); db.owner = args[0].replace(/[^0-9]/g,''); F.saveDB(db); return reply('✅ Owner set'); }, ownerOnly: true },
-  { name: 'addowner', run: async ({reply, args, db, F}) => { if(!args[0]) return reply('Usage: .addowner <number>'); db.owners = db.owners || []; db.owners.push(args[0].replace(/[^0-9]/g,'')); F.saveDB(db); return reply('✅ Added owner'); }, ownerOnly: true },
-  { name: 'delowner', run: async ({reply, args, db, F}) => { if(!args[0]) return reply('Usage: .delowner <number>'); db.owners = (db.owners||[]).filter(x=>x!==args[0].replace(/[^0-9]/g,'')); F.saveDB(db); return reply('✅ Removed owner'); }, ownerOnly: true },
-  { name: 'listowner', run: async ({reply, db, config}) => reply(`👑 Main: ${config.ownerNumber}\nExtra: ${(db.owners||[]).join(', ') || 'None'}`) },
-  { name: 'update', run: async ({reply}) => reply('🔄 Go GitHub pull latest, Render go redeploy.') },
-  { name: 'repo', run: async ({reply, config}) => reply(`📦 META AI MD REPO\nPrefix: ${config.prefixes[0]}\nDM owner for link.`) },
 
-  // AUTO
-  { name: 'autoread', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autoread = args[0] !== 'off'; F.saveDB(db); return reply(`✅ Autoread: ${db.auto.autoread ? 'ON' : 'OFF'}`); } },
-  { name: 'autotyping', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autotyping = args[0] !== 'off'; F.saveDB(db); return reply(`✅ Autotyping: ${db.auto.autotyping ? 'ON' : 'OFF'}`); } },
-  { name: 'autoonline', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autoonline = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoOnline: ${db.auto.autoonline ? 'ON' : 'OFF'}`); } },
-  { name: 'autosticker', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autosticker = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoSticker: ${db.auto.autosticker ? 'ON' : 'OFF'}`); } },
-  { name: 'autoview', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autoview = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoView: ${db.auto.autoview ? 'ON' : 'OFF'}`); } },
-  { name: 'autolikestatus', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autolikestatus = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoLike Status: ${db.auto.autolikestatus ? 'ON' : 'OFF'}`); } },
-  { name: 'autodownload', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autodownload = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoDownload: ${db.auto.autodownload ? 'ON' : 'OFF'}`); } },
-  { name: 'autolikemsg', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autolikemsg = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoLike Msg: ${db.auto.autolikemsg ? 'ON' : 'OFF'}`); } },
-  { name: 'autotranslate', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autotranslate = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoTranslate: ${db.auto.autotranslate ? 'ON' : 'OFF'}`); } },
-  { name: 'autotag', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autotag = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoTag: ${db.auto.autotag ? 'ON' : 'OFF'}`); } },
-  { name: 'autoblock', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autoblock = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoBlock: ${db.auto.autoblock ? 'ON' : 'OFF'}`); } },
-  { name: 'autofollow', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autofollow = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoFollow: ${db.auto.autofollow ? 'ON' : 'OFF'}`); } },
-  { name: 'autocorrect', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autocorrect = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoCorrect: ${db.auto.autocorrect ? 'ON' : 'OFF'}`); } },
-  { name: 'autogreet', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autogreet = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoGreet: ${db.auto.autogreet ? 'ON' : 'OFF'}`); } },
-  { name: 'autopresence', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autopresence = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoPresence: ${db.auto.autopresence ? 'ON' : 'OFF'}`); } },
-  { name: 'autostatus', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autostatus = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoStatus: ${db.auto.autostatus ? 'ON' : 'OFF'}`); } },
-  { name: 'autorespond', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autorespond = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoRespond: ${db.auto.autorespond ? 'ON' : 'OFF'}`); } },
-  { name: 'autoclean', run: async ({reply, args, db, F}) => { db.auto = db.auto || {}; db.auto.autoclean = args[0] !== 'off'; F.saveDB(db); return reply(`✅ AutoClean: ${db.auto.autoclean ? 'ON' : 'OFF'}`); } },
-  { name: 'speed', run: async ({reply}) => { let s = Date.now(); return reply(`⚡ Speed: ${Date.now()-s}ms`); } },
-  { name: 'uptime', run: async ({reply}) => { let u = process.uptime(); return reply(`⏱️ Uptime: ${Math.floor(u/3600)}h ${Math.floor((u%3600)/60)}m ${Math.floor(u%60)}s`); } },
-  { name: 'runtime', run: async ({reply}) => { let u = process.uptime(); return reply(`⏱️ Runtime: ${Math.floor(u/3600)}h ${Math.floor((u%3600)/60)}m ${Math.floor(u%60)}s`); } },
+    // ================= OWNER =================
 
-  // ANTI - short lines, no long array
-  { name: 'antiflood', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiflood = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiflood: ${db.anti.antiflood ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antifake', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antifake = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antifake: ${db.anti.antifake ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antinsfw', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antinsfw = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antinsfw: ${db.anti.antinsfw ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiscam', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiscam = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiscam: ${db.anti.antiscam ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiraid', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiraid = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiraid: ${db.anti.antiraid ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antivirus', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antivirus = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antivirus: ${db.anti.antivirus ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antimention', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antimention = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antimention: ${db.anti.antimention ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antigroup', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antigroup = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antigroup: ${db.anti.antigroup ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antidocument', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antidocument = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antidocument: ${db.anti.antidocument ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiimage', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiimage = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiimage: ${db.anti.antiimage ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiaudio', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiaudio = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiaudio: ${db.anti.antiaudio ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiforward', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiforward = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiforward: ${db.anti.antiforward ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antiedit', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antiedit = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antiedit: ${db.anti.antiedit ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antireport', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antireport = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antireport: ${db.anti.antireport ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antilinkwarn', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antilinkwarn = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antilinkwarn: ${db.anti.antilinkwarn ? 'ON' : 'OFF'}`); }, groupOnly: true },
-  { name: 'antimention2', run: async ({reply, args, db, F, from, isGroup}) => { if(!isGroup) return reply('Use in group'); db.anti = db.anti || {}; db.anti.antimention2 = args[0] !== 'off'; F.saveDB(db); return reply(`✅ antimention2: ${db.anti.antimention2 ? 'ON' : 'OFF'}`); }, groupOnly: true },
+    {
+        name: 'alive',
+        run: async ({ reply, config }) =>
+            reply(`✅ *${config.botName} IS ONLINE*`)
+    },
 
-  // MODERATOR
-  { name: 'warn', run: async ({reply, args, m, db, F, isGroup}) => { if(!isGroup) return reply('Group only'); let t = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || (args[0] ? args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net' : null); if(!t) return reply('Tag person: .warn @user'); db.warns = db.warns || {}; db.warns[t] = (db.warns[t]||0)+1; F.saveDB(db); return reply(`⚠️ Warned @${t.split('@')[0]} - Total: ${db.warns[t]}/3`, {mentions:[t]}); }, groupOnly: true },
-  { name: 'warnings', run: async ({reply, m, args, db}) => { let t = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || (args[0] ? args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net' : null); if(!t) return reply('Tag person'); return reply(`⚠️ @${t.split('@')[0]} has ${db.warns?.[t]||0} warns`, {mentions:[t]}); } },
-  { name: 'resetwarn', run: async ({reply, args, db, F, m}) => { let t = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || (args[0] ? args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net' : null); if(!t) return reply('Tag person'); db.warns = db.warns || {}; db.warns[t]=0; F.saveDB(db); return reply('✅ Warns reset'); } },
-  { name: 'delete', aliases: ['del'], run: async ({reply, m, sock, from}) => { let c = m.message?.extendedTextMessage?.contextInfo; if(!c?.stanzaId) return reply('Reply to message to delete'); await sock.sendMessage(from, {delete: {remoteJid: from, fromMe: false, id: c.stanzaId, participant: c.participant}}).catch(()=>{}); return reply('✅ Deleted'); } },
-  { name: 'purge', run: async ({reply}) => reply('🧹 Reply to message + .purge to delete') },
-  { name: 'clear', run: async ({reply, sock, from}) => { await sock.chatModify({clear: {messages: [{id: '0', fromMe: false, timestamp: Date.now()}] }}, from).catch(()=>{}); return reply('✅ Chat cleared'); } },
-  { name: 'tagadmin', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); let a = md.participants.filter(p=>p.admin).map(p=>p.id); return reply(`👑 ADMINS\n${a.map(x=>`@${x.split('@')[0]}`).join('\n')}`, {mentions: a}); }, groupOnly: true },
-  { name: 'groupmute', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'announcement'); return reply('🔇 Group muted'); }, groupOnly: true },
-  { name: 'groupunmute', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'not_announcement'); return reply('🔊 Group unmuted'); }, groupOnly: true },
-  { name: 'lock', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'locked'); return reply('🔒 Group locked'); }, groupOnly: true },
-  { name: 'unlock', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'unlocked'); return reply('🔓 Group unlocked'); }, groupOnly: true },
-  { name: 'approve', run: async ({reply, args, sock, from}) => { if(!args[0]) return reply('Usage: .approve <number>'); await sock.groupRequestParticipantsUpdate(from, [args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'], 'approve').catch(()=>{}); return reply('✅ Approved'); }, groupOnly: true },
-  { name: 'disapprove', run: async ({reply, args, sock, from}) => { if(!args[0]) return reply('Usage: .disapprove <number>'); await sock.groupRequestParticipantsUpdate(from, [args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'], 'reject').catch(()=>{}); return reply('❌ Rejected'); }, groupOnly: true },
-  { name: 'restrict', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'announcement'); return reply('🚫 Group restricted'); }, groupOnly: true },
-  { name: 'unrestrict', run: async ({reply, sock, from}) => { await sock.groupSettingUpdate(from, 'not_announcement'); return reply('✅ Group unrestricted'); }, groupOnly: true },
-  { name: 'setwarn', run: async ({reply, args, db, F}) => { db.maxWarn = parseInt(args[0])||3; F.saveDB(db); return reply(`✅ Max warn set to ${db.maxWarn}`); } },
-  { name: 'resetmember', run: async ({reply}) => reply('Use .resetwarn @user') },
-  { name: 'removeall', run: async ({reply}) => reply('⚠️ Use .kick @user one by one') },
-  { name: 'getadmin', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); let a = md.participants.filter(p=>p.admin).map(p=>p.id); return reply(`👑 Admins: ${a.map(x=>`@${x.split('@')[0]}`).join(', ')}`, {mentions: a}); }, groupOnly: true },
-  { name: 'listwarn', run: async ({reply, db}) => { let list = Object.entries(db.warns||{}).filter(([k,v])=>v>0); if(!list.length) return reply('No warns yet'); return reply(`⚠️ WARN LIST\n${list.map(([k,v])=>`@${k.split('@')[0]}: ${v}`).join('\n')}`); } },
-  { name: 'staff', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); let a = md.participants.filter(p=>p.admin).map(p=>p.id); return reply(`👑 STAFF\n${a.map(x=>`@${x.split('@')[0]}`).join('\n')}`, {mentions: a}); }, groupOnly: true },
-  { name: 'setrules', run: async ({reply, args, db, F, from}) => { if(!args.length) return reply('Usage: .setrules <rules>'); db.group = db.group || {}; db.group[from] = db.group[from] || {}; db.group[from].rules = args.join(' '); F.saveDB(db); return reply('✅ Rules set'); }, groupOnly: true },
+    {
+        name: 'setprefix',
+        ownerOnly: true,
+        run: async ({ reply, args, db, F }) => {
+            if (!args[0]) return reply('Usage: .setprefix <prefix>');
 
-  // GROUP
-  { name: 'groupinfo', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); return reply(`📋 GROUP INFO\nName: ${md.subject}\nMembers: ${md.participants.length}`); }, groupOnly: true },
-  { name: 'grouplink', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let code = await sock.groupInviteCode(from); return reply(`🔗 Link: https://chat.whatsapp.com/${code}`); }, groupOnly: true },
-  { name: 'listmembers', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); return reply(`👥 MEMBERS (${md.participants.length})\n${md.participants.map((p,i)=>`${i+1}. @${p.id.split('@')[0]}`).join('\n')}`, {mentions: md.participants.map(p=>p.id)}); }, groupOnly: true },
-  { name: 'admins', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); let a = md.participants.filter(p=>p.admin); return reply(`👑 ADMINS\n${a.map(p=>`@${p.id.split('@')[0]}`).join('\n')}`, {mentions: a.map(p=>p.id)}); }, groupOnly: true },
-  { name: 'members', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); return reply(`👥 Members: ${md.participants.length}`); }, groupOnly: true },
-  { name: 'getpic', run: async ({reply, sock, from, m}) => { let t = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || from; try{ let url = await sock.profilePictureUrl(t, 'image'); return reply(`🖼️ Pic: ${url}`); }catch(e){ return reply('No profile pic'); } } },
-  { name: 'setgroup', run: async ({reply, args, db, F, from}) => { db.group = db.group || {}; db.group[from] = db.group[from] || {}; db.group[from].name = args.join(' '); F.saveDB(db); return reply('✅ Group settings saved'); }, groupOnly: true },
-  { name: 'resetlink', run: async ({reply, sock, from}) => { await sock.groupRevokeInvite(from); let code = await sock.groupInviteCode(from); return reply(`🔗 New Link: https://chat.whatsapp.com/${code}`); }, groupOnly: true },
-  { name: 'accept', run: async ({reply, args, sock, from}) => { if(!args[0]) return reply('Usage: .accept <number>'); await sock.groupRequestParticipantsUpdate(from, [args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'], 'approve').catch(()=>{}); return reply('✅ Accepted'); }, groupOnly: true },
-  { name: 'reject', run: async ({reply, args, sock, from}) => { if(!args[0]) return reply('Usage: .reject <number>'); await sock.groupRequestParticipantsUpdate(from, [args[0].replace(/[^0-9]/g,'')+'@s.whatsapp.net'], 'reject').catch(()=>{}); return reply('❌ Rejected'); }, groupOnly: true },
-  { name: 'setwelcome', run: async ({reply, args, db, F, from}) => { db.group = db.group || {}; db.group[from] = db.group[from] || {}; db.group[from].welcomeMsg = args.join(' '); db.group[from].welcome = true; F.saveDB(db); return reply('✅ Welcome set'); }, groupOnly: true },
-  { name: 'setgoodbye', run: async ({reply, args, db, F, from}) => { db.group = db.group || {}; db.group[from] = db.group[from] || {}; db.group[from].goodbyeMsg = args.join(' '); db.group[from].goodbye = true; F.saveDB(db); return reply('✅ Goodbye set'); }, groupOnly: true },
-  { name: 'poll', run: async ({reply, args}) => { if(args.length<3) return reply('Usage: .poll Question | Opt1 | Opt2'); let parts = args.join(' ').split('|').map(s=>s.trim()); return reply(`📊 POLL: ${parts[0]}\n\n1️⃣ ${parts[1]}\n2️⃣ ${parts[2]||''}`); } },
-  { name: 'vote', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .vote 1'); return reply(`✅ You voted for ${args[0]}`); } },
-  { name: 'endpoll', run: async ({reply}) => reply('📊 Poll ended') },
-  { name: 'groupid', run: async ({reply, from}) => reply(`🆔 Group ID: ${from}`) },
-  { name: 'rules', run: async ({reply, db, from}) => reply(`📜 RULES\n\n${db.group?.[from]?.rules || '1. No spam\n2. Respect all\n3. No NSFW'}`) },
-  { name: 'getrules', run: async ({reply, db, from}) => reply(`📜 RULES\n\n${db.group?.[from]?.rules || 'No rules set. Admin use .setrules'}`) },
-  { name: 'groupmembers', run: async ({reply, sock, from, isGroup}) => { if(!isGroup) return reply('Group only'); let md = await sock.groupMetadata(from); return reply(`👥 Total: ${md.participants.length}`); }, groupOnly: true },
+            db.settings = db.settings || {};
+            db.settings.prefix = args[0];
 
-  // VV
-  { name: 'vv', run: async ({reply}) => reply('👁️ Reply to ViewOnce with .vv') },
-  { name: 'viewonce', run: async ({reply}) => reply('👁️ Reply to ViewOnce with .vv') },
-  { name: 'saveview', run: async ({reply}) => reply('💾 Reply to ViewOnce with .vv') },
-  { name: 'readview', run: async ({reply}) => reply('👁️ Reply to ViewOnce with .vv') },
-  { name: 'vvimage', run: async ({reply}) => reply('🖼️ Reply to ViewOnce image with .vv') },
-  { name: 'vvvideo', run: async ({reply}) => reply('🎥 Reply to ViewOnce video with .vv') },
-  { name: 'vvaudio', run: async ({reply}) => reply('🎵 Reply to ViewOnce audio with .vv') },
-  { name: 'vvinfo', run: async ({reply}) => reply('ℹ️ ViewOnce disappear after viewing once.') },
-  { name: 'vvstatus', run: async ({reply, db}) => reply(`👁️ VV: ${db.auto?.antiviewonce ? 'ON' : 'OFF'}`) },
-  { name: 'vvhelp', run: async ({reply}) => reply('👁️ VV HELP\nReply to ViewOnce with .vv') },
+            await F.saveDB(db);
 
-  // DOWNLOADER - ONE PER LINE, NO LONG ARRAY
-  { name: 'instagram', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .instagram <link>'); return reply(`⬇️ INSTAGRAM\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'mediafire', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .mediafire <link>'); return reply(`⬇️ MEDIAFIRE\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'apk', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .apk <app name>'); return reply(`⬇️ APK\nApp: ${args.join(' ')}\n⏳ Searching...`); } },
-  { name: 'github', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .github <link>'); return reply(`⬇️ GITHUB\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'twitter', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .twitter <link>'); return reply(`⬇️ TWITTER\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'xvideo', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .xvideo <link>'); return reply(`⬇️ XVIDEO\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'soundcloud', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .soundcloud <link>'); return reply(`⬇️ SOUNDCLOUD\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'youtube', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .youtube <link>'); return reply(`⬇️ YOUTUBE\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'gdrive', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .gdrive <link>'); return reply(`⬇️ GDRIVE\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'tiktok', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .tiktok <link>'); return reply(`⬇️ TIKTOK\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'facebook', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .facebook <link>'); return reply(`⬇️ FACEBOOK\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'spotify', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .spotify <link>'); return reply(`⬇️ SPOTIFY\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'pinterest', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .pinterest <link>'); return reply(`⬇️ PINTEREST\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'threads', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .threads <link>'); return reply(`⬇️ THREADS\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'capcut', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .capcut <link>'); return reply(`⬇️ CAPCUT\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'terabox', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .terabox <link>'); return reply(`⬇️ TERABOX\nLink: ${args[0]}\n⏳ Downloading...`); } },
-  { name: 'snapchat', run: async ({reply, args}) => { if(!args[0]) return reply('Usage: .snapchat <link>'); return reply(`⬇️ SNAPCHAT\nLink: ${args[0]}\n⏳ Downloading...`); } },
+            return reply(`✅ Prefix saved: ${args[0]}`);
+        }
+    },
 
-  // FUN EXTRA
-  { name: 'howgay', run: async ({reply}) => reply(`🌈 You na ${Math.floor(Math.random()*101)}% gay 😂`) },
-  { name: 'howugly', run: async ({reply}) => reply(`🤡 You na ${Math.floor(Math.random()*101)}% ugly 😂`) },
-  { name: 'howbeautiful', run: async ({reply}) => reply(`😍 You na ${Math.floor(Math.random()*101)}% beautiful 😍`) },
-  { name: 'howrich', run: async ({reply}) => reply(`💰 You go be ${Math.floor(Math.random()*101)}% rich 🔥`) },
-  { name: 'goodmorning', run: async ({reply}) => reply('🌞 Good morning! Have a blessed day 🔥') },
-  { name: 'goodnight', run: async ({reply}) => reply('🌙 Good night! Sleep well 😴') },
-  { name: 'goodafternoon', run: async ({reply}) => reply('☀️ Good afternoon!') },
-  { name: 'goodevening', run: async ({reply}) => reply('🌆 Good evening!') },
-  { name: 'whoami', run: async ({reply, m}) => reply(`🪪 You be @${m.key.participant?.split('@')[0] || m.key.remoteJid.split('@')[0]}`) },
-  { name: 'myid', run: async ({reply, from}) => reply(`🆔 Your ID: ${from}`) },
-  { name: 'myname', run: async ({reply, m}) => reply(`👤 Your name: ${m.pushName || 'Unknown'}`) },
-  { name: 'botname', run: async ({reply, config}) => reply(`🤖 Bot Name: ${config.botName}`) },
-  { name: 'ownername', run: async ({reply, config}) => reply(`👑 Owner: ${config.ownerAlias}`) },
-  { name: 'ping2', run: async ({reply}) => reply('🏓 Pong! META AI MD dey alive 🔥') }
+    {
+        name: 'join',
+        ownerOnly: true,
+        run: async ({ reply, args, sock }) => {
+            if (!args[0]) return reply('Usage: .join <group link>');
+
+            const match = args[0].match(
+                /chat\.whatsapp\.com\/([A-Za-z0-9]+)/
+            );
+
+            if (!match) return reply('❌ Invalid group link.');
+
+            return safe(
+                reply,
+                () => sock.groupAcceptInvite(match[1]),
+                () => '✅ Successfully joined group.'
+            );
+        }
+    },
+
+    {
+        name: 'leave',
+        ownerOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            await reply('👋 Leaving group.');
+
+            return safe(
+                reply,
+                () => sock.groupLeave(from),
+                () => '✅ Left group.'
+            );
+        }
+    },
+
+    {
+        name: 'block',
+        ownerOnly: true,
+        run: async ({ reply, args, sock }) => {
+            const jid = getTarget({ message: {} }, args);
+
+            if (!jid) return reply('Usage: .block <number>');
+
+            return safe(
+                reply,
+                () => sock.updateBlockStatus(jid, 'block'),
+                () => `✅ Blocked ${jid.split('@')[0]}`
+            );
+        }
+    },
+
+    {
+        name: 'unblock',
+        ownerOnly: true,
+        run: async ({ reply, args, sock }) => {
+            const jid = getTarget({ message: {} }, args);
+
+            if (!jid) return reply('Usage: .unblock <number>');
+
+            return safe(
+                reply,
+                () => sock.updateBlockStatus(jid, 'unblock'),
+                () => `✅ Unblocked ${jid.split('@')[0]}`
+            );
+        }
+    },
+
+    {
+        name: 'addowner',
+        ownerOnly: true,
+        run: async ({ reply, args, db, F }) => {
+            const number = args[0]?.replace(/[^0-9]/g, '');
+
+            if (!number) return reply('Usage: .addowner <number>');
+
+            db.owners = db.owners || [];
+
+            if (db.owners.includes(number)) {
+                return reply('Already an owner.');
+            }
+
+            db.owners.push(number);
+            await F.saveDB(db);
+
+            return reply(`✅ Owner added: ${number}`);
+        }
+    },
+
+    {
+        name: 'delowner',
+        ownerOnly: true,
+        run: async ({ reply, args, db, F }) => {
+            const number = args[0]?.replace(/[^0-9]/g, '');
+
+            if (!number) return reply('Usage: .delowner <number>');
+
+            db.owners = (db.owners || []).filter(
+                owner => owner !== number
+            );
+
+            await F.saveDB(db);
+
+            return reply(`✅ Owner removed: ${number}`);
+        }
+    },
+
+    {
+        name: 'listowner',
+        run: async ({ reply, db, config }) => {
+            return reply(
+                `👑 OWNER LIST\n\n` +
+                `Main: ${config.ownerNumber}\n` +
+                `Extra: ${(db.owners || []).join(', ') || 'None'}`
+            );
+        }
+    },
+
+    // ================= INFORMATION =================
+
+    {
+        name: 'uptime',
+        run: async ({ reply }) => {
+            const seconds = Math.floor(process.uptime());
+
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+
+            return reply(`⏱️ UPTIME\n${h}h ${m}m ${s}s`);
+        }
+    },
+
+    {
+        name: 'runtime',
+        run: async ({ reply }) => {
+            const seconds = Math.floor(process.uptime());
+
+            return reply(
+                `⏱️ Runtime: ${Math.floor(seconds / 3600)}h ` +
+                `${Math.floor((seconds % 3600) / 60)}m ` +
+                `${seconds % 60}s`
+            );
+        }
+    },
+
+    {
+        name: 'speed',
+        run: async ({ reply, sock }) => {
+            const start = Date.now();
+
+            await sock.sendPresenceUpdate('available');
+
+            return reply(`⚡ Response time: ${Date.now() - start}ms`);
+        }
+    },
+
+    // ================= AUTO SETTINGS =================
+    // These save settings. Your message handler must implement
+    // the corresponding automation before these features take effect.
+
+    ...[
+        'autoread',
+        'autotyping',
+        'autoonline',
+        'autoview',
+        'autosticker',
+        'autolikestatus',
+        'autodownload',
+        'autolikemsg',
+        'autotranslate',
+        'autotag',
+        'autoblock',
+        'autofollow',
+        'autocorrect',
+        'autogreet',
+        'autopresence',
+        'autostatus',
+        'autorespond',
+        'autoclean'
+    ].map(name => ({
+        name,
+        run: async ({ reply, args, db, F }) =>
+            setStatus(reply, db, F, 'auto', name, args)
+    })),
+
+    // ================= ANTI SETTINGS =================
+
+    ...[
+        'antiflood',
+        'antifake',
+        'antiscam',
+        'antiraid',
+        'antivirus',
+        'antimention',
+        'antigroup',
+        'antidocument',
+        'antiimage',
+        'antiaudio',
+        'antiforward',
+        'antiedit',
+        'antireport',
+        'antilinkwarn'
+    ].map(name => ({
+        name,
+        groupOnly: true,
+        run: async ({ reply, args, db, F, isGroup, from }) => {
+            if (!isGroup) return reply('Group only.');
+
+            db.anti = db.anti || {};
+            db.anti[from] = db.anti[from] || {};
+
+            const value = args[0]?.toLowerCase();
+
+            if (!['on', 'off'].includes(value)) {
+                return reply(`Usage: .${name} on/off`);
+            }
+
+            db.anti[from][name] = value === 'on';
+
+            await F.saveDB(db);
+
+            return reply(`✅ ${name}: ${value.toUpperCase()}`);
+        }
+    })),
+
+    // ================= MODERATION =================
+
+    {
+        name: 'warn',
+        groupOnly: true,
+        run: async ({ reply, args, m, db, F, isGroup, from }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const target = getTarget(m, args);
+
+            if (!target) return reply('Tag a member.');
+
+            db.warns = db.warns || {};
+            db.warns[from] = db.warns[from] || {};
+
+            const count = (db.warns[from][target] || 0) + 1;
+
+            db.warns[from][target] = count;
+
+            await F.saveDB(db);
+
+            return reply(
+                `⚠️ @${target.split('@')[0]}\nWarnings: ${count}/${db.maxWarn || 3}`,
+                { mentions: [target] }
+            );
+        }
+    },
+
+    {
+        name: 'warnings',
+        groupOnly: true,
+        run: async ({ reply, args, m, db, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const target = getTarget(m, args);
+
+            if (!target) return reply('Tag a member.');
+
+            const count = db.warns?.[from]?.[target] || 0;
+
+            return reply(
+                `⚠️ @${target.split('@')[0]} has ${count} warnings.`,
+                { mentions: [target] }
+            );
+        }
+    },
+
+    {
+        name: 'resetwarn',
+        groupOnly: true,
+        run: async ({ reply, args, m, db, F, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const target = getTarget(m, args);
+
+            if (!target) return reply('Tag a member.');
+
+            db.warns = db.warns || {};
+            db.warns[from] = db.warns[from] || {};
+            db.warns[from][target] = 0;
+
+            await F.saveDB(db);
+
+            return reply('✅ Warnings reset.');
+        }
+    },
+
+    {
+        name: 'listwarn',
+        groupOnly: true,
+        run: async ({ reply, db, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const list = Object.entries(db.warns?.[from] || {})
+                .filter(([, count]) => count > 0);
+
+            if (!list.length) return reply('No warnings found.');
+
+            const mentions = list.map(([jid]) => jid);
+
+            return reply(
+                `⚠️ WARNING LIST\n\n` +
+                list.map(([jid, count]) =>
+                    `@${jid.split('@')[0]}: ${count}`
+                ).join('\n'),
+                { mentions }
+            );
+        }
+    },
+
+    {
+        name: 'setwarn',
+        ownerOnly: true,
+        run: async ({ reply, args, db, F }) => {
+            const limit = Number(args[0]);
+
+            if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+                return reply('Usage: .setwarn <1-10>');
+            }
+
+            db.maxWarn = limit;
+            await F.saveDB(db);
+
+            return reply(`✅ Maximum warnings: ${limit}`);
+        }
+    },
+
+    {
+        name: 'delete',
+        aliases: ['del'],
+        groupOnly: true,
+        run: async ({ reply, m, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const ctx = m.message?.extendedTextMessage?.contextInfo;
+
+            if (!ctx?.stanzaId) {
+                return reply('Reply to a message.');
+            }
+
+            const key = {
+                remoteJid: from,
+                id: ctx.stanzaId,
+                fromMe: ctx.participant === sock.user.id
+            };
+
+            if (ctx.participant) key.participant = ctx.participant;
+
+            return safe(
+                reply,
+                () => sock.sendMessage(from, { delete: key }),
+                () => '✅ Message deleted.'
+            );
+        }
+    },
+
+    // ================= GROUP MANAGEMENT =================
+
+    {
+        name: 'groupinfo',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupMetadata(from),
+                md =>
+                    `📋 GROUP INFORMATION\n\n` +
+                    `Name: ${md.subject}\n` +
+                    `Members: ${md.participants.length}\n` +
+                    `Owner: ${md.owner || 'Unavailable'}`
+            );
+        }
+    },
+
+    {
+        name: 'grouplink',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupInviteCode(from),
+                code => `🔗 https://chat.whatsapp.com/${code}`
+            );
+        }
+    },
+
+    {
+        name: 'resetlink',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                async () => {
+                    await sock.groupRevokeInvite(from);
+                    return sock.groupInviteCode(from);
+                },
+                code => `✅ New group link:\nhttps://chat.whatsapp.com/${code}`
+            );
+        }
+    },
+
+    {
+        name: 'groupmute',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupSettingUpdate(from, 'announcement'),
+                () => '🔇 Group muted.'
+            );
+        }
+    },
+
+    {
+        name: 'groupunmute',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupSettingUpdate(from, 'not_announcement'),
+                () => '🔊 Group unmuted.'
+            );
+        }
+    },
+
+    {
+        name: 'lock',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupSettingUpdate(from, 'locked'),
+                () => '🔒 Group information locked.'
+            );
+        }
+    },
+
+    {
+        name: 'unlock',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupSettingUpdate(from, 'unlocked'),
+                () => '🔓 Group information unlocked.'
+            );
+        }
+    },
+
+    {
+        name: 'admins',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupMetadata(from),
+                md => {
+                    const admins = md.participants.filter(p => p.admin);
+
+                    return `👑 GROUP ADMINS\n\n` +
+                        admins.map(p => `@${p.id.split('@')[0]}`).join('\n');
+                }
+            );
+        }
+    },
+
+    {
+        name: 'members',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupMetadata(from),
+                md => `👥 Total members: ${md.participants.length}`
+            );
+        }
+    },
+
+    {
+        name: 'listmembers',
+        groupOnly: true,
+        run: async ({ reply, sock, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            return safe(
+                reply,
+                () => sock.groupMetadata(from),
+                md => {
+                    const members = md.participants;
+
+                    return `👥 MEMBERS (${members.length})\n\n` +
+                        members.map((p, i) =>
+                            `${i + 1}. @${p.id.split('@')[0]}`
+                        ).join('\n');
+                }
+            );
+        }
+    },
+
+    {
+        name: 'getpic',
+        run: async ({ reply, sock, from, m, args }) => {
+            const target = getTarget(m, args) || from;
+
+            return safe(
+                reply,
+                () => sock.profilePictureUrl(target, 'image'),
+                url => `🖼️ Profile picture:\n${url}`
+            );
+        }
+    },
+
+    {
+        name: 'setrules',
+        groupOnly: true,
+        run: async ({ reply, args, db, F, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            if (!args.length) {
+                return reply('Usage: .setrules <rules>');
+            }
+
+            db.group = db.group || {};
+            db.group[from] = db.group[from] || {};
+            db.group[from].rules = args.join(' ');
+
+            await F.saveDB(db);
+
+            return reply('✅ Group rules saved.');
+        }
+    },
+
+    {
+        name: 'rules',
+        groupOnly: true,
+        run: async ({ reply, db, from, isGroup }) => {
+            if (!isGroup) return reply('Group only.');
+
+            const rules = db.group?.[from]?.rules;
+
+            return reply(rules || 'No group rules have been configured.');
+        }
+    }
+
 ];
