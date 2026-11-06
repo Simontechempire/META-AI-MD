@@ -9,7 +9,18 @@ function statusText(db, key, label, prefix) {
 async function setAnti(db, key, args, reply, label, prefix, ctx) {
   // REAL PERMISSION CHECK - Must be Owner or Group Admin
   if (!ctx.isGroup) return reply('❌ Group only command.');
-  if (!ctx.isOwner && !ctx.isAdmin) return reply('❌ Admins only. Only group admin fit use anti commands.');
+  // FIXED ERROR 1: index.js no dey send ctx.isAdmin, so check am here with groupMetadata
+  let isAdmin = !!ctx.isAdmin;
+  if (!isAdmin && !ctx.isOwner && ctx.sock && ctx.from) {
+    try {
+      let md = await ctx.sock.groupMetadata(ctx.from);
+      let senderId = ctx.sender || '';
+      let senderNum = String(ctx.senderNum || senderId).replace(/[^0-9]/g, '');
+      let p = (md.participants || []).find(x => x.id === senderId || x.phoneNumber === senderId || String(x.phoneNumber || '').split('@')[0] === senderNum || String(x.id || '').split('@')[0] === senderNum);
+      isAdmin = !!(p && (p.admin === 'admin' || p.admin === 'superadmin'));
+    } catch(e){}
+  }
+  if (!ctx.isOwner && !isAdmin) return reply('❌ Admins only. Only group admin fit use anti commands.');
   if (!db.anti) db.anti = {};
   let v = (args[0] || '').toLowerCase();
   if (v === 'on' || v === 'off') {
@@ -61,15 +72,21 @@ async function handleAnti(sock, m, db, F) {
     // Owner bypass
     let isOwner = false;
     try { if (F.isOwner) isOwner = F.isOwner(sender, db); } catch(e){}
+    if (!isOwner) {
+      try { if (F.isOwnerMessage) isOwner = F.isOwnerMessage(m, db); } catch(e){}
+    }
     if (isOwner) return false;
 
     // Get group metadata ONCE - real admin check
     let metadata;
     try { metadata = await sock.groupMetadata(from); } catch(e){ return false; }
     let participants = metadata.participants || [];
-    let me = participants.find(p => p.id === sock.user.id || p.id.includes(sock.user.id.split(':')[0]));
+    // FIXED ERROR 2: LID fix - check id OR phoneNumber OR participantPn for bot + sender
+    let myNum = String(sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
+    let myPn = sock.user?.id || '';
+    let me = participants.find(p => p.id === sock.user.id || p.phoneNumber === myPn || String(p.phoneNumber || '').split('@')[0] === myNum || String(p.id || '').split('@')[0] === myNum);
     let isBotAdmin = !!(me && (me.admin === 'admin' || me.admin === 'superadmin'));
-    let senderP = participants.find(p => p.id === sender);
+    let senderP = participants.find(p => p.id === sender || p.phoneNumber === sender || String(p.phoneNumber || '').split('@')[0] === senderNum || String(p.id || '').split('@')[0] === senderNum);
     let isSenderAdmin = !!(senderP && (senderP.admin === 'admin' || senderP.admin === 'superadmin'));
     if (isSenderAdmin) return false; // Admins bypass
 
