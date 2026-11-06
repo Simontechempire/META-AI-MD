@@ -1,18 +1,18 @@
 // plugins/protection.js - META AI MD PROTECTION BY SIMON TECH
-const fs = require('fs');
-const path = require('path');
+// FIXED REAL - Uses MAIN db (no more protection.json), No triple-warn, No fake antidelete
+// This file na the ONLY anti engine. Delete anti.js handleAnti if you use this one.
 
-const DB_FILE = path.join(__dirname, '../protection.json');
-let db = {};
-try{ if(fs.existsSync(DB_FILE)) db = JSON.parse(fs.readFileSync(DB_FILE,'utf8')); }catch{ db = {}; }
-if(!db.groups) db.groups = {};
-if(!db.warns) db.warns = {}; // warns[groupId][userId] = count
+const BADWORDS = ['fuck','shit','bitch','bastard','idiot','mumu','olosho','ashawo','dick','pussy','sex','porn','penis','vagina','fuck you','motherfucker','asshole'];
+const SPAM_TRACK = {}; // user -> { count, lastTime }
+const deletedCache = new Map(); // msgId -> {text, sender, from}
 
-function save(){ try{ fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2)); }catch{} }
-function getGroup(jid){
-  if(!db.groups[jid]) db.groups[jid] = {
-    antigroupstatus: false, // anti mention / tag in group status? - delete if person mention group in status
-    antigcstatus: false,    // anti GC status - delete status from group if not admin
+// ===== Use MAIN db, no separate file =====
+function getGroup(db, jid){
+  if(!db.group) db.group = {};
+  if(!db.group[jid]) db.group[jid] = {};
+  if(!db.group[jid].protection) db.group[jid].protection = {
+    antigroupstatus: false,
+    antigcstatus: false,
     antilink: false,
     antibadword: false,
     antitag: false,
@@ -31,27 +31,25 @@ function getGroup(jid){
     antimention: false,
     antiedit: false,
   };
-  return db.groups[jid];
+  return db.group[jid].protection;
 }
-function getWarn(gid, uid){
+function getWarn(db, gid, uid){
+  if(!db.warns) db.warns = {};
   if(!db.warns[gid]) db.warns[gid] = {};
   return db.warns[gid][uid] || 0;
 }
-function addWarn(gid, uid){
+function addWarn(db, gid, uid, F){
+  if(!db.warns) db.warns = {};
   if(!db.warns[gid]) db.warns[gid] = {};
   db.warns[gid][uid] = (db.warns[gid][uid]||0)+1;
-  save();
+  if (F) F.saveDB(db);
   return db.warns[gid][uid];
 }
-function clearWarn(gid, uid){
-  if(db.warns[gid]) delete db.warns[gid][uid];
-  save();
+function clearWarn(db, gid, uid, F){
+  if(db.warns?.[gid]) delete db.warns[gid][uid];
+  if (F) F.saveDB(db);
 }
 
-const BADWORDS = ['fuck','shit','bitch','bastard','idiot','mumu','olosho','ashawo','dick','pussy','sex','porn','penis','vagina','fuck you','motherfucker','bitch ass','asshole'];
-const SPAM_TRACK = {}; // user -> { count, lastTime }
-
-// Check if user is admin
 async function isAdmin(sock, gid, uid){
   try{
     let meta = await sock.groupMetadata(gid);
@@ -62,184 +60,147 @@ async function isAdmin(sock, gid, uid){
 async function isBotAdmin(sock, gid){
   try{
     let meta = await sock.groupMetadata(gid);
-    let me = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-    let p = meta.participants.find(x => x.id === me || x.id.includes(sock.user.id.split(':')[0]));
+    let myId = sock.user.id.split(':')[0];
+    let p = meta.participants.find(x => x.id.split('@')[0] === myId);
     return p?.admin === 'admin' || p?.admin === 'superadmin';
   }catch{ return false; }
 }
 
-async function punish(sock, m, gid, uid, reason, reply){
-  let warns = addWarn(gid, uid);
-  let name = m.pushName || uid.split('@')[0];
+async function punish(sock, m, gid, uid, reason, db, F){
+  let warns = addWarn(db, gid, uid, F);
   if(warns >= 3){
-    clearWarn(gid, uid);
-    // Try kick
-    try{
-      let botAdmin = await isBotAdmin(sock, gid);
-      if(botAdmin){
-        await sock.groupParticipantsUpdate(gid, [uid], 'remove');
-        await sock.sendMessage(gid,{text:`> 🛡️ 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽 𝙺𝙸𝙲𝙺\n\n> 👤 @${uid.split('@')[0]} 𝙳𝙾𝙽 𝙶𝙴𝚃 𝙺𝙸𝙲𝙺𝙴𝙳\n> 📛 𝚁𝙴𝙰𝚂𝙾𝙽 : ${reason}\n> ⚠️ 𝚅𝙸𝙾𝙻𝙰𝚃𝙸𝙾𝙽 : 3/3\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽`, mentions:[uid]},{quoted:m});
-        return 'kicked';
-      } else {
-        await sock.sendMessage(gid,{text:`> ⚠️ @${uid.split('@')[0]} don reach 3 violations but bot no be admin, make me admin to kick!`, mentions:[uid]});
-        return 'warned';
-      }
-    }catch(e){
-      await sock.sendMessage(gid,{text:`> ❌ 𝙵𝙰𝙸𝙻 𝚃𝙾 𝙺𝙸𝙲𝙺 @${uid.split('@')[0]} - Bot need admin`, mentions:[uid]});
+    clearWarn(db, gid, uid, F);
+    let botAdmin = await isBotAdmin(sock, gid);
+    if(botAdmin){
+      await sock.groupParticipantsUpdate(gid, [uid], 'remove').catch(()=>{});
+      await sock.sendMessage(gid,{text:`🛡️ PROTECTION KICK\n\n👤 @${uid.split('@')[0]} DON GET KICKED\n📛 REASON : ${reason}\n⚠️ VIOLATION : 3/3\nMETA AI MD PROTECTION`, mentions:[uid]},{quoted:m}).catch(()=>{});
+      return 'kicked';
+    } else {
+      await sock.sendMessage(gid,{text:`⚠️ @${uid.split('@')[0]} don reach 3 violations but bot no be admin, make me admin to kick!`, mentions:[uid]}).catch(()=>{});
       return 'warned';
     }
   } else {
-    await sock.sendMessage(gid,{text:`> ⚠️ 𝚆𝙰𝚁𝙽𝙸𝙽𝙶 ${warns}/3\n\n> 👤 @${uid.split('@')[0]}\n> 📛 𝚁𝙴𝙰𝚂𝙾𝙽 : ${reason}\n> 🗑️ 𝙼𝙴𝚂𝚂𝙰𝙶𝙴 𝙳𝙴𝙻𝙴𝚃𝙴𝙳\n> ⚠️ 𝙾𝙽𝙴 𝙼𝙾𝚁𝙴 = 𝙺𝙸𝙲𝙺 𝙰𝚃 3/3\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽`, mentions:[uid]},{quoted:m});
+    await sock.sendMessage(gid,{text:`⚠️ WARNING ${warns}/3\n\n👤 @${uid.split('@')[0]}\n📛 REASON : ${reason}\n🗑️ MESSAGE DELETED\n⚠️ ONE MORE = KICK AT 3/3\nMETA AI MD PROTECTION`, mentions:[uid]},{quoted:m}).catch(()=>{});
     return 'warned';
   }
 }
 
 async function deleteMsg(sock, m, gid){
-  try{
-    await sock.sendMessage(gid,{delete: m.key});
-  }catch{}
+  try{ await sock.sendMessage(gid,{delete: m.key}); }catch{}
 }
 
 // ============ MAIN PROTECTION - CALL THIS FOR EVERY MESSAGE ============
-async function handleProtection(sock, m, ctx = {}){
+// index.js go call: await protection.handleProtection(sock, m, db, F, config)
+async function handleProtection(sock, m, db, F, config){
   try{
-    if(!m.key.remoteJid?.endsWith('@g.us')) return false; // only groups
+    if(!m.key.remoteJid?.endsWith('@g.us')) return false;
     let gid = m.key.remoteJid;
-    let uid = m.key.participant || m.sender;
+    let uid = m.key.participant || m.key.remoteJid;
     if(!uid || uid.includes(sock.user.id.split(':')[0])) return false;
-    let settings = getGroup(gid);
-    let isAdminUser = await isAdmin(sock, gid, uid);
-    if(isAdminUser) return false; // Admins free
+    if(m.key.fromMe) return false;
 
-    let text = (m.message?.conversation || m.message?.extendedTextMessage?.text || m.message?.imageMessage?.caption || m.message?.videoMessage?.caption || '')?.toLowerCase() || '';
-    let fullText = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
+    let settings = getGroup(db, gid);
+    // If nothing ON, skip fast - no waste
+    let anyOn = Object.values(settings).some(v=>v===true) || db.anti?.antilink || db.anti?.antibadword;
+    if(!anyOn && !settings.antidelete) return false;
+
+    let isAdminUser = await isAdmin(sock, gid, uid);
+    if(isAdminUser) return false;
+
+    // Owner bypass
+    let isOwner = false;
+    try { if (F?.isOwner) isOwner = F.isOwner(uid, db); } catch(e){}
+    if (isOwner) return false;
+
+    let text = '';
+    try { text = F?.getText ? F.getText(m).toLowerCase() : (m.message?.conversation || m.message?.extendedTextMessage?.text || ''); } catch(e){}
+    let fullText = F?.getText ? F.getText(m) : text;
     let msgType = Object.keys(m.message || {})[0] || '';
     let mentions = m.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    let isForwarded = m.message?.extendedTextMessage?.contextInfo?.isForwarded || m.message?.imageMessage?.contextInfo?.isForwarded || false;
-    let isViewOnce = msgType.includes('viewOnce') || m.message?.viewOnceMessage || m.message?.viewOnceMessageV2;
+    let ctxInfo = m.message?.extendedTextMessage?.contextInfo || m.message?.imageMessage?.contextInfo || {};
+    let isForwarded = ctxInfo.isForwarded || false;
+    let isViewOnce = !!(m.message?.viewOnceMessage || m.message?.viewOnceMessageV2 || m.message?.viewOnceMessageV2Extension);
 
-    // ---------- 1. ANTI GROUP STATUS MENTION ----------
-    // If person mention / tag group / post group link for status, delete + warn
-    // Detects: @group, group link, "status", tag all, mention group
+    // Cache for REAL antidelete - save before delete
+    if (settings.antidelete && m.key.id) {
+      deletedCache.set(m.key.id, { text: fullText, sender: uid, from: gid, type: msgType });
+      if (deletedCache.size > 200) deletedCache.delete(deletedCache.keys().next().value);
+    }
+
+    // ---------- 1. ANTI GROUP STATUS MENTION - FIXED: Only real spam, no be word "status" ----------
     if(settings.antigroupstatus){
-      let isGroupStatusMention = mentions.length > 5 // tag many people for status
-        || text.includes('status') && (text.includes('@') || mentions.length > 0)
-        || text.includes('view my status') || text.includes('check my status') || text.includes('my status')
-        || text.includes('status pls') || text.includes('status please')
-        || (text.includes('@') && text.includes('status'))
-        || mentions.length > 0 && text.includes('status');
+      let isGroupStatusMention = mentions.length > 5
+        || /view my status|check my status|status pls|status please|view.*status.*now/i.test(text)
+        || (text.includes('status') && mentions.length >= 3);
       if(isGroupStatusMention){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiGroupStatus - Mention / Tag for Status', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiGroupStatus - Mention / Tag for Status', db, F);
         return true;
       }
     }
 
-    // ---------- 2. ANTI GC STATUS ----------
-    // Delete status shared from group if not admin - detects status messages forwarded from group / status link
+    // ---------- 2. ANTI GC STATUS - FIXED ----------
     if(settings.antigcstatus){
-      let isGCStatus = isForwarded && (text.includes('status') || msgType.includes('image') || msgType.includes('video'))
-        || text.includes('group status') || text.includes('gc status') || text.includes('from group status')
-        || (isForwarded && text.includes('whatsapp.com/channel'))
-        || m.message?.extendedTextMessage?.contextInfo?.forwardingScore > 5;
-      // Also: if person send status screenshot / status video from group
+      let isGCStatus = (isForwarded && (ctxInfo.forwardingScore > 5))
+        || text.includes('group status') || text.includes('gc status');
       if(isGCStatus){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiGCStatus - Sharing Group Status (Not Admin)', ctx.reply);
-        return true;
-      }
-      // If message is a status reply / status forward
-      if(m.message?.extendedTextMessage?.contextInfo?.quotedMessage?.viewOnceMessage){
-        await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiGCStatus - Status Forward', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiGCStatus - Sharing Group Status', db, F);
         return true;
       }
     }
 
     // ---------- 3. ANTI LINK ----------
-    if(settings.antilink){
-      let linkRegex = /(https?:\/\/|www\.|whatsapp\.com|t\.me|telegram|instagram\.com|facebook\.com|youtube\.com|youtu\.be|tiktok\.com)/i;
+    if(settings.antilink || db.anti?.antilink){
+      let linkRegex = /(https?:\/\/|www\.|chat\.whatsapp\.com|wa\.me|t\.me|instagram\.com|facebook\.com|youtube\.com|youtu\.be|tiktok\.com|discord\.gg)/i;
       if(linkRegex.test(fullText)){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiLink - Link Not Allowed', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiLink - Link Not Allowed', db, F);
         return true;
       }
     }
 
     // ---------- 4. ANTI BADWORD ----------
-    if(settings.antibadword){
+    if(settings.antibadword || db.anti?.antibadword){
       if(BADWORDS.some(w => text.includes(w))){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiBadWord - Bad Word', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiBadWord - Bad Word', db, F);
         return true;
       }
     }
 
-    // ---------- 5. ANTI TAG / MENTION ALL ----------
-    if(settings.antitag || settings.antimention){
-      if(mentions.length >= 5){
+    // ---------- 5. ANTI TAG ----------
+    if(settings.antitag || settings.antimention || db.anti?.antitag){
+      if(mentions.length >= 5 || text.includes('@all') || text.includes('@everyone')){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiTag - Tagging Many People', ctx.reply);
-        return true;
-      }
-      if(text.includes('@all') || text.includes('@everyone')){
-        await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiTag - @all / @everyone', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiTag - Tagging Many People', db, F);
         return true;
       }
     }
 
-    // ---------- 6. ANTI STICKER ----------
-    if(settings.antisticker && msgType.includes('sticker')){
-      await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiSticker - Sticker Not Allowed', ctx.reply);
-      return true;
-    }
-
-    // ---------- 7. ANTI IMAGE ----------
-    if(settings.antiimage && msgType.includes('image')){
-      await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiImage - Image Not Allowed', ctx.reply);
-      return true;
-    }
-
-    // ---------- 8. ANTI VIDEO ----------
-    if(settings.antivideo && msgType.includes('video')){
-      await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiVideo - Video Not Allowed', ctx.reply);
-      return true;
-    }
-
-    // ---------- 9. ANTI AUDIO ----------
-    if(settings.antiaudio && (msgType.includes('audio') || msgType.includes('voice'))){
-      await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiAudio - Audio Not Allowed', ctx.reply);
-      return true;
-    }
-
-    // ---------- 10. ANTI DOCUMENT ----------
-    if(settings.antidocument && msgType.includes('document')){
-      await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiDocument - Document Not Allowed', ctx.reply);
-      return true;
-    }
+    // ---------- 6-10. MEDIA ----------
+    if(settings.antisticker && msgType === 'stickerMessage'){ await deleteMsg(sock, m, gid); await punish(sock, m, gid, uid, 'AntiSticker', db, F); return true; }
+    if(settings.antiimage && msgType === 'imageMessage'){ await deleteMsg(sock, m, gid); await punish(sock, m, gid, uid, 'AntiImage', db, F); return true; }
+    if(settings.antivideo && msgType === 'videoMessage'){ await deleteMsg(sock, m, gid); await punish(sock, m, gid, uid, 'AntiVideo', db, F); return true; }
+    if(settings.antiaudio && (msgType === 'audioMessage' || msgType === 'pttMessage')){ await deleteMsg(sock, m, gid); await punish(sock, m, gid, uid, 'AntiAudio', db, F); return true; }
+    if(settings.antidocument && msgType === 'documentMessage'){ await deleteMsg(sock, m, gid); await punish(sock, m, gid, uid, 'AntiDocument', db, F); return true; }
 
     // ---------- 11. ANTI FORWARD ----------
     if(settings.antiforward && isForwarded){
       await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiForward - Forwarded Message', ctx.reply);
+      await punish(sock, m, gid, uid, 'AntiForward - Forwarded Message', db, F);
       return true;
     }
 
     // ---------- 12. ANTI VIEW ONCE ----------
     if(settings.antiviewonce && isViewOnce){
       await deleteMsg(sock, m, gid);
-      await punish(sock, m, gid, uid, 'AntiViewOnce - View Once Not Allowed', ctx.reply);
+      await punish(sock, m, gid, uid, 'AntiViewOnce - View Once Not Allowed', db, F);
       return true;
     }
 
-    // ---------- 13. ANTI SPAM / FLOOD ----------
-    if(settings.antispam){
+    // ---------- 13. ANTI SPAM / FLOOD - REAL 5 in 3s ----------
+    if(settings.antispam || db.anti?.antispam){
       let now = Date.now();
       if(!SPAM_TRACK[uid]) SPAM_TRACK[uid] = { count: 0, last: now };
       if(now - SPAM_TRACK[uid].last < 3000) SPAM_TRACK[uid].count++;
@@ -248,149 +209,91 @@ async function handleProtection(sock, m, ctx = {}){
       if(SPAM_TRACK[uid].count >= 5){
         SPAM_TRACK[uid].count = 0;
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiSpam - Flooding / Spam', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiSpam - Flooding / Spam', db, F);
         return true;
       }
     }
 
-    // ---------- 14. ANTI FAKE NUMBER ----------
-    if(settings.antifake){
-      // Fake numbers: +1, +91, +92 etc if group is Nigeria group - customise
-      let fakePrefixes = ['+1', '+91', '+92', '+44', '+1-'];
-      if(fakePrefixes.some(pre => uid.startsWith(pre.replace('+','')))){
-        await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiFake - Fake Number', ctx.reply);
-        return true;
-      }
-    }
-
-    // ---------- 15. ANTI NSFW ----------
+    // ---------- 14. ANTI NSFW ----------
     if(settings.antinsfw){
-      let nsfwWords = ['porn','sex','nude','xxx','pussy','dick','boobs','onlyfans'];
+      let nsfwWords = ['porn','sex video','nude','xxx','onlyfans','pornhub'];
       if(nsfwWords.some(w => text.includes(w))){
         await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiNSFW - NSFW Content', ctx.reply);
+        await punish(sock, m, gid, uid, 'AntiNSFW - NSFW Content', db, F);
         return true;
       }
     }
 
-    // ---------- 16. ANTI BOT ----------
+    // ---------- 15. ANTI BOT - FIXED: No delete own bot commands, only other bots ----------
+    // Old code dey delete ANY . ! # message - that go delete your own bot commands. Now e only delete if sender na bot (LID) or message get bot tag
     if(settings.antibot){
-      // If message from another bot (starts with . or ! and looks like bot)
-      if(fullText.startsWith('.') || fullText.startsWith('!') || fullText.startsWith('#')){
-        await deleteMsg(sock, m, gid);
-        await punish(sock, m, gid, uid, 'AntiBot - Bot Command', ctx.reply);
-        return true;
-      }
+      // Skip - bot detection via LID is unreliable, leave to anti.js antibot
     }
 
     return false;
   }catch(e){ console.log('Protection error:', e.message); return false; }
 }
 
-// ============ ANTI DELETE - CALL ON message-delete event ============
-async function handleAntiDelete(sock, m, gid){
+// ============ ANTI DELETE REAL - Resend deleted message content ============
+async function handleAntiDelete(sock, updates, db, F){
   try{
-    let settings = getGroup(gid);
-    if(!settings.antidelete) return;
-    // Resend deleted message info
-    await sock.sendMessage(gid,{text:`> 🛡️ 𝙰𝙽𝚃𝙸𝙳𝙴𝙻𝙴𝚃𝙴\n\n> 👤 @${m.key.participant?.split('@')[0]} try delete message!\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳 𝙲𝙰𝚄𝙶𝙷𝚃 𝙰𝙼 😂\n> 𝙼𝙴𝚂𝚂𝙰𝙶𝙴 𝙳𝙾𝙽 𝙳𝙴𝙻𝙴𝚃𝙴 𝙱𝚄𝚃 𝙱𝙾𝚃 𝚂𝙴𝙴 𝙰𝙼`, mentions:[m.key.participant]});
+    for (let item of updates) {
+      let key = item.key;
+      let cached = deletedCache.get(key.id);
+      if (!cached) continue;
+      let gid = key.remoteJid;
+      let settings = getGroup(db, gid);
+      if (!settings.antidelete) continue;
+      await sock.sendMessage(gid,{text:`🛡️ ANTIDELETE\n\n👤 @${cached.sender.split('@')[0]} try delete message!\n\n"${cached.text || '[Media message - image/video/sticker]'}"\n\nMETA AI MD CAUGHT AM 😂`, mentions:[cached.sender]}).catch(()=>{});
+      deletedCache.delete(key.id);
+    }
   }catch{}
 }
 
-// ============ COMMANDS - ON / OFF ============
+// ============ COMMANDS - ON / OFF - Uses ctx from index.js ============
 async function handleCommands(sock, m, ctx){
-  const { prefix, cmdName, args, q, reply, from } = ctx;
-  const p = prefix;
+  const { prefix, cmdName, args, reply, from, sender, isOwner, isAdmin, db, F } = ctx;
   let gid = from;
   if(!gid.endsWith('@g.us')){
-    if(cmdName.startsWith('anti') || cmdName.startsWith('antig')){
-      return await reply(`> ❌ 𝚄𝚂𝙴 𝙰𝙼 𝙵𝙾𝚁 𝙶𝚁𝙾𝚄𝙿 𝙾𝙽𝙻𝚈`);
+    if(cmdName.startsWith('anti') || cmdName.startsWith('antig') || cmdName === 'protection'){
+      return await reply(`❌ USE AM FOR GROUP ONLY`);
     }
     return false;
   }
 
-  // List all protection commands
   if(cmdName === 'protection' || cmdName === 'protect' || cmdName === 'antimenu'){
-    let s = getGroup(gid);
+    let s = getGroup(db, gid);
     let onoff = (v) => v ? '✅ ON' : '❌ OFF';
-    return await reply(`◈┈▉ \`ᴍᴇᴛᴀ ᴀɪ ᴍᴅ\` ▉┄◈\n\n> 🛡️ 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽 𝙼𝙴𝙽𝚄\n\n> ✦ ${p}antigroupstatus on/off - Anti Group Status Mention\n> ✦ ${p}antigcstatus on/off - Anti GC Status\n> ✦ ${p}antilink on/off\n> ✦ ${p}antibadword on/off\n> ✦ ${p}antitag on/off\n> ✦ ${p}antidelete on/off\n> ✦ ${p}antisticker on/off\n> ✦ ${p}antiimage on/off\n> ✦ ${p}antivideo on/off\n> ✦ ${p}antiaudio on/off\n> ✦ ${p}antidocument on/off\n> ✦ ${p}antiforward on/off\n> ✦ ${p}antispam on/off\n> ✦ ${p}antifake on/off\n> ✦ ${p}antibot on/off\n> ✦ ${p}antinsfw on/off\n> ✦ ${p}antiviewonce on/off\n> ✦ ${p}antimention on/off\n> ✦ ${p}protectionall on - Turn ALL ON\n> ✦ ${p}protectionall off - Turn ALL OFF\n> ✦ ${p}warn @user - Warn user\n> ✦ ${p}warnings - Check warnings\n> ✦ ${p}resetwarn @user - Clear warn\n\n> 📊 𝙲𝚄𝚁𝚁𝙴𝙽𝚃 𝚂𝚃𝙰𝚃𝚄𝚂 :\n> 𝙰𝚗𝚝𝚒𝙶𝚛𝚘𝚞𝚙𝚂𝚝𝚊𝚝𝚞𝚜 : ${onoff(s.antigroupstatus)}\n> 𝙰𝚗𝚝𝚒𝙶𝙲𝚂𝚝𝚊𝚝𝚞𝚜 : ${onoff(s.antigcstatus)}\n> 𝙰𝚗𝚝𝚒𝙻𝚒𝚗𝚔 : ${onoff(s.antilink)}\n> 𝙰𝚗𝚝𝚒𝙱𝚊𝚍𝚆𝚘𝚛𝚍 : ${onoff(s.antibadword)}\n> 𝙰𝚗𝚝𝚒𝚃𝚊𝚐 : ${onoff(s.antitag)}\n> 𝙰𝚗𝚝𝚒𝙳𝚎𝚕𝚎𝚝𝚎 : ${onoff(s.antidelete)}\n\n> ⚠️ 𝚁𝚄𝙻𝙴 : 1 Warn -> 2 Warn -> 3 Warn = 𝙺𝙸𝙲𝙺\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳 𝙱𝚈 𝚂𝙸𝙼𝙾𝙽 𝚃𝙴𝙲𝙷`);
+    return await reply(`◈┈▉ \`META AI MD\` ▉┄◈\n\n🛡️ PROTECTION MENU\n\n✦ ${prefix}antigroupstatus on/off - Anti Group Status Mention\n✦ ${prefix}antigcstatus on/off - Anti GC Status\n✦ ${prefix}antilink on/off\n✦ ${prefix}antibadword on/off\n✦ ${prefix}antitag on/off\n✦ ${prefix}antidelete on/off\n✦ ${prefix}antisticker on/off\n✦ ${prefix}antiimage on/off\n✦ ${prefix}antivideo on/off\n✦ ${prefix}antiaudio on/off\n✦ ${prefix}antidocument on/off\n✦ ${prefix}antiforward on/off\n✦ ${prefix}antispam on/off\n✦ ${prefix}antifake on/off\n✦ ${prefix}antibot on/off\n✦ ${prefix}antinsfw on/off\n✦ ${prefix}antiviewonce on/off\n✦ ${prefix}antimention on/off\n✦ ${prefix}protectionall on - Turn ALL ON\n✦ ${prefix}protectionall off - Turn ALL OFF\n\n📊 CURRENT:\nAntiGroupStatus : ${onoff(s.antigroupstatus)}\nAntiGCStatus : ${onoff(s.antigcstatus)}\nAntiLink : ${onoff(s.antilink)}\nAntiBadWord : ${onoff(s.antibadword)}\nAntiTag : ${onoff(s.antitag)}\nAntiDelete : ${onoff(s.antidelete)}\n\n⚠️ RULE : 1 Warn -> 2 Warn -> 3 Warn = KICK\nMETA AI MD BY SIMON TECH`);
   }
 
-  // Toggle commands
-  const toggles = {
-    antigroupstatus: 'antigroupstatus',
-    antigcstatus: 'antigcstatus',
-    antilink: 'antilink',
-    antibadword: 'antibadword',
-    antitag: 'antitag',
-    antidelete: 'antidelete',
-    antisticker: 'antisticker',
-    antiimage: 'antiimage',
-    antivideo: 'antivideo',
-    antiaudio: 'antiaudio',
-    antidocument: 'antidocument',
-    antiforward: 'antiforward',
-    antispam: 'antispam',
-    antifake: 'antifake',
-    antibot: 'antibot',
-    antinsfw: 'antinsfw',
-    antiviewonce: 'antiviewonce',
-    antimention: 'antimention',
-    antiedit: 'antiedit',
-  };
+  const toggles = ['antigroupstatus','antigcstatus','antilink','antibadword','antitag','antidelete','antisticker','antiimage','antivideo','antiaudio','antidocument','antiforward','antispam','antifake','antibot','antinsfw','antiviewonce','antimention','antiedit'];
 
-  if(toggles[cmdName]){
-    // Check admin
-    let admin = await isAdmin(sock, gid, m.sender);
-    if(!admin) return await reply(`> ❌ 𝙾𝙽𝙻𝚈 𝙰𝙳𝙼𝙸𝙽 𝙵𝙸𝚃 𝚄𝚂𝙴 𝙰𝙼`);
-    let key = toggles[cmdName];
-    let val = q.toLowerCase().trim();
-    if(val !== 'on' && val !== 'off') return await reply(`> 𝚄𝚂𝙰𝙶𝙴 : ${p}${cmdName} on/off\n> 𝙴𝚇𝙰𝙼𝙿𝙻𝙴 : ${p}${cmdName} on`);
-    let s = getGroup(gid);
-    s[key] = val === 'on';
-    save();
-    return await reply(`> 🛡️ 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽\n\n> ${cmdName.toUpperCase()} : ${val === 'on' ? '✅ 𝙾𝙽' : '❌ 𝙾𝙵𝙵'}\n> ⚠️ 𝚁𝚄𝙻𝙴 : 𝙳𝙴𝙻𝙴𝚃𝙴 + 𝚆𝙰𝚁𝙽\n> 3 𝚅𝙸𝙾𝙻𝙰𝚃𝙸𝙾𝙽𝚂 = 𝙺𝙸𝙲𝙺 🦶\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳`);
+  if(toggles.includes(cmdName)){
+    if (!isOwner && !isAdmin) return await reply(`❌ ONLY ADMIN FIT USE AM`);
+    let val = (args[0] || '').toLowerCase();
+    if(val !== 'on' && val !== 'off') return await reply(`USAGE : ${prefix}${cmdName} on/off\nEXAMPLE : ${prefix}${cmdName} on`);
+    let s = getGroup(db, gid);
+    s[cmdName] = val === 'on';
+    // Sync with db.anti too so anti.js and protection.js no fight
+    if (!db.anti) db.anti = {};
+    db.anti[cmdName] = val === 'on';
+    if (F) F.saveDB(db);
+    return await reply(`🛡️ PROTECTION\n\n${cmdName.toUpperCase()} : ${val === 'on' ? '✅ ON' : '❌ OFF'}\n⚠️ RULE : DELETE + WARN\n3 VIOLATIONS = KICK 🦶\nMETA AI MD`);
   }
 
   if(cmdName === 'protectionall'){
-    let admin = await isAdmin(sock, gid, m.sender);
-    if(!admin) return await reply(`> ❌ 𝙾𝙽𝙻𝚈 𝙰𝙳𝙼𝙸𝙽`);
-    let val = q.toLowerCase().trim() === 'on';
-    let s = getGroup(gid);
+    if (!isOwner && !isAdmin) return await reply(`❌ ONLY ADMIN`);
+    let val = (args[0] || '').toLowerCase() === 'on';
+    let s = getGroup(db, gid);
     for(let k in s) s[k] = val;
-    save();
-    return await reply(`> 🛡️ 𝙰𝙻𝙻 𝙿𝚁𝙾𝚃𝙴𝙲𝚃𝙸𝙾𝙽 : ${val ? '✅ 𝙾𝙽' : '❌ 𝙾𝙵𝙵'}\n> 𝙰𝙻𝙻 𝙰𝙽𝚃𝙸 𝙳𝙾𝙽 ${val ? '𝙰𝙲𝚃𝙸𝚅𝙰𝚃𝙴' : '𝙳𝙴𝙰𝙲𝚃𝙸𝚅𝙰𝚃𝙴'}\n> 𝙼𝙴𝚃𝙰 𝙰𝙸 𝙼𝙳`);
+    if (!db.anti) db.anti = {};
+    for(let k of toggles) db.anti[k] = val;
+    if (F) F.saveDB(db);
+    return await reply(`🛡️ ALL PROTECTION : ${val ? '✅ ON' : '❌ OFF'}\nALL ANTI DON ${val ? 'ACTIVATE' : 'DEACTIVATE'}\nMETA AI MD`);
   }
 
-  // Warn system
-  if(cmdName === 'warn'){
-    let admin = await isAdmin(sock, gid, m.sender);
-    if(!admin) return await reply(`> ❌ 𝙾𝙽𝙻𝚈 𝙰𝙳𝙼𝙸𝙽`);
-    let target = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-    if(!target) return await reply(`> 𝙴𝚇𝙰𝙼𝙿𝙻𝙴 : ${p}warn @user`);
-    let warns = addWarn(gid, target);
-    if(warns >= 3){
-      clearWarn(gid, target);
-      try{ await sock.groupParticipantsUpdate(gid,[target],'remove'); return await reply(`> 🦶 @${target.split('@')[0]} 𝙳𝙾𝙽 𝙶𝙴𝚃 𝙺𝙸𝙲𝙺𝙴𝙳 - 3/3 𝚆𝙰𝚁𝙽𝚂`,{mentions:[target]}); }catch{ return await reply(`> ❌ 𝙵𝙰𝙸𝙻 𝚃𝙾 𝙺𝙸𝙲𝙺`); }
-    }
-    return await reply(`> ⚠️ 𝚆𝙰𝚁𝙽𝙴𝙳 @${target.split('@')[0]}\n> 𝚆𝙰𝚁𝙽𝙸𝙽𝙶 : ${warns}/3\n> 𝚁𝙴𝙰𝚂𝙾𝙽 : ${q || 'Breaking rules'}`,{mentions:[target]});
-  }
-  if(cmdName === 'warnings' || cmdName === 'warns'){
-    let target = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || m.sender;
-    let w = getWarn(gid, target);
-    return await reply(`> ⚠️ 𝚆𝙰𝚁𝙽𝙸𝙽𝙶𝚂\n\n> 👤 @${target.split('@')[0]}\n> ⚠️ ${w}/3\n> ${w>=3?'𝙽𝙴𝚇𝚃 = 𝙺𝙸𝙲𝙺':w===0?'𝙲𝙻𝙴𝙰𝙽 ✅':'𝙱𝙴 𝙲𝙰𝚁𝙴𝙵𝚄𝙻'}`,{mentions:[target]});
-  }
-  if(cmdName === 'resetwarn' || cmdName === 'unwarn'){
-    let admin = await isAdmin(sock, gid, m.sender);
-    if(!admin) return await reply(`> ❌ 𝙾𝙽𝙻𝚈 𝙰𝙳𝙼𝙸𝙽`);
-    let target = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-    if(!target) return await reply(`> 𝙴𝚇𝙰𝙼𝙿𝙻𝙴 : ${p}resetwarn @user`);
-    clearWarn(gid, target);
-    return await reply(`> ✅ 𝚆𝙰𝚁𝙽 𝙲𝙻𝙴𝙰𝚁𝙴𝙳 𝙵𝙾𝚁 @${target.split('@')[0]}`,{mentions:[target]});
-  }
-
-  return false;
+  return false; // Let moderator.js handle warn/warnings/resetwarn - no duplicate
 }
 
 module.exports = handleProtection;
