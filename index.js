@@ -1,4 +1,4 @@
-// index.js - META AI MD - FIXED - BY SIMON TECH
+// index.js - META AI MD - FIXED PRIVATE MODE - BY SIMON TECH
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -17,6 +17,26 @@ let db = F.loadDB();
 let isStarting = false;
 let reconnectTimer = null;
 
+// ===== HELPER: STRONG OWNER CHECK =====
+function isOwnerCheck(sender, db){
+  let num = String(sender || '').replace(/[^0-9]/g, '');
+  let owners = [];
+  if(config.ownerNumber) owners.push(String(config.ownerNumber).replace(/[^0-9]/g, ''));
+  if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
+  if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
+  if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
+  // Also try F.isOwner if e work
+  try{ if(F.isOwner && F.isOwner(sender, db)) return true; }catch(e){}
+  return owners.includes(num);
+}
+function getMode(db){
+  // Check all places where mode fit dey - private fit dey for different key
+  if(db.settings?.mode) return db.settings.mode;
+  if(db.mode) return db.mode;
+  if(db.settings?.self) return 'private';
+  return 'public';
+}
+
 // ===== FANCY BOLD FONT =====
 function fancy(text){
   const map = {a:'𝐚',b:'𝐛',c:'𝐜',d:'𝐝',e:'𝐞',f:'𝐟',g:'𝐠',h:'𝐡',i:'𝐢',j:'𝐣',k:'𝐤',l:'𝐥',m:'𝐦',n:'𝐧',o:'𝐨',p:'𝐩',q:'𝐪',r:'𝐫',s:'𝐬',t:'𝐭',u:'𝐮',v:'𝐯',w:'𝐰',x:'𝐱',y:'𝐲',z:'𝐳',A:'𝐀',B:'𝐁',C:'𝐂',D:'𝐃',E:'𝐄',F:'𝐅',G:'𝐆',H:'𝐇',I:'𝐈',J:'𝐉',K:'𝐊',L:'𝐋',M:'𝐌',N:'𝐍',O:'𝐎',P:'𝐏',Q:'𝐐',R:'𝐑',S:'𝐒',T:'𝐓',U:'𝐔',V:'𝐕',W:'𝐖',X:'𝐗',Y:'𝐘',Z:'𝐙',0:'𝟎',1:'𝟏',2:'𝟐',3:'𝟑',4:'𝟒',5:'𝟓',6:'𝟔',7:'𝟕',8:'𝟖',9:'𝟗'};
@@ -25,13 +45,13 @@ function fancy(text){
 F.fancy = fancy;
 F.bold = fancy;
 
-// ===== LOAD PLUGINS - FIXED: SUPPORTS ARRAY + FUNCTION =====
+// ===== LOAD PLUGINS - SUPPORTS ARRAY + FUNCTION =====
 let antiMod = null, autoMod = null;
 try{ antiMod = require('./plugins/anti.js'); }catch(e){}
 try{ autoMod = require('./plugins/auto.js'); }catch(e){}
 
 let commands = new Map();
-let functionPlugins = []; // <-- NEW: for owner.js, fun.js, game.js, text.js
+let functionPlugins = [];
 
 function loadPlugins(){
   commands.clear();
@@ -48,20 +68,16 @@ function loadPlugins(){
       let full = path.join(dir, file);
       delete require.cache[require.resolve(full)];
       let plugin = require(full);
-
-      // CASE 1: FUNCTION plugin - owner.js, fun.js, game.js, text.js
       if(typeof plugin === 'function'){
         functionPlugins.push({ file, fn: plugin });
         console.log(`✅ Loaded FUNCTION ${file}`);
         continue;
       }
-      // CASE 2: Object with handler
       if(plugin && typeof plugin.handler === 'function'){
         functionPlugins.push({ file, fn: plugin.handler });
         console.log(`✅ Loaded HANDLER ${file}`);
         continue;
       }
-      // CASE 3: ARRAY plugin - missing.js etc
       let list = [];
       if(Array.isArray(plugin)) list = plugin;
       else if(plugin && Array.isArray(plugin.plugins)) list = plugin.plugins;
@@ -85,7 +101,7 @@ function loadPlugins(){
 loadPlugins();
 
 // ===== EXPRESS + KEEPALIVE =====
-app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length }));
+app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(db) }));
 app.get('/ping', (req,res)=> res.send('pong'));
 app.get('/pair', async (req,res)=>{
   try{
@@ -167,16 +183,20 @@ async function start(){
       }
     });
 
+    // ===== STATUS - BLOCKED IN PRIVATE =====
     sock.ev.on('messages.upsert', async ({ messages }) => {
       try {
         if (messages[0]?.key?.remoteJid === 'status@broadcast') {
+          if(getMode(db) === 'private') return;
           if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
         }
       } catch(e){}
     });
 
+    // ===== GROUP JOIN/LEAVE - BLOCKED IN PRIVATE =====
     sock.ev.on('group-participants.update', async (u) => {
       try {
+        if(getMode(db) === 'private') return;
         let from = u.id;
         let g = db.group?.[from];
         if (!g) return;
@@ -213,7 +233,9 @@ async function start(){
         if(!body) continue;
         console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
         let isGroup = F.isGroup(from);
-        let isOwner = F.isOwner(sender, db);
+
+        // ===== FIX 1: STRONG OWNER CHECK - BEFORE EVERYTHING =====
+        let isOwner = isOwnerCheck(sender, db);
         let isSelfCommand = false;
         if(m.key.fromMe){
           let hasPrefix = config.prefixes.some(p => body.startsWith(p));
@@ -222,6 +244,16 @@ async function start(){
           isOwner = true;
           console.log('✅ Self-command detected, treating as owner');
         }
+
+        // ===== FIX 2: PRIVATE MODE - BLOCK EVERYTHING FIRST =====
+        // This MUST be before anti, auto, forward, menu, plugins
+        // If na private and no be owner, bot go silent - NO reply at all
+        let mode = getMode(db);
+        if(mode === 'private' && !isOwner){
+          console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
+          continue;
+        }
+
         if (db.banned?.includes(senderNum) && !isOwner) continue;
         if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
           try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
@@ -239,7 +271,7 @@ async function start(){
         let args = body.slice(usedPrefix.length).trim().split(/ +/);
         let cmdName = (args.shift()||'').toLowerCase();
         let text = args.join(' ');
-        if(db.settings?.mode === 'private' && !isOwner) continue;
+        // No second private check here - already blocked for top
         const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
         const fancyReply = async (t, opts={}) => sock.sendMessage(from, { text: fancy(t) }, { quoted: m, ...opts });
         if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
@@ -250,7 +282,6 @@ async function start(){
         }
         if(cmdName === 'reload' && isOwner){ loadPlugins(); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
 
-        // ===== FIXED: TRY FUNCTION PLUGINS FIRST (owner, fun, game, text) =====
         let ctx = { sock, m, from, sender, senderNum, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply };
         let handled = false;
         for(let fp of functionPlugins){
@@ -261,13 +292,11 @@ async function start(){
             ]);
             if(r){ handled = true; F.saveDB(db); break; }
           }catch(e){
-            // function plugin no handle am or error - try next, no crash
             if(e.message !== 'timeout') console.log('FUNC PLUGIN ERR', fp.file, cmdName, e.message);
           }
         }
         if(handled) continue;
 
-        // ===== THEN ARRAY PLUGINS (missing.js etc) =====
         let plugin = commands.get(cmdName);
         if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
         if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
