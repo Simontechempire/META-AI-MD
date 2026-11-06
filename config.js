@@ -8,22 +8,25 @@ module.exports = {
   ownerName: 'META',
   ownerAlias: 'Simon Tech',
   ownerNumber: '2348102350169', // +234 810 235 0169 - no + , no space
-  owners: ['2348102350169'],
+  owners: ['2348102350169'], // Phone numbers only - person wey pair the bot = MAIN OWNER
+  ownerLids: ['23223458631686'], // LID of owner - for LID match ONLY, no be phone number
   ownerJid: '2348102350169@s.whatsapp.net',
   botNumber: '', // auto-filled after pairing, leave empty
 
   // ===== PREFIX =====
   // Bot go answer to ALL of these
-  prefixes: ['.', '!', '?', '@', '-', '/'],
+  prefixes: ['.', ',', '!', '?', '@', '-', '/'],
   prefix: '.',
 
-  // ===== STYLE / FOOTER =====
+  // ===== STYLE / FOOTER / FANCY / REACTION =====
   footer: '©️ created by Simon tech inc',
   header: '◈┈▉ `ᴍᴇᴛᴀ ᴀɪ ᴍᴅ` ▉┄◈',
   botPfp: 'https://files.catbox.moe/hhafg3.jpg',
   thumb: 'https://files.catbox.moe/hhafg3.jpg',
   menuPfp: 'https://i.postimg.cc/GmSz8cDT/IMG-20261105-WA0073.jpg',
   alivePfp: 'https://files.catbox.moe/hhafg3.jpg',
+  fancy: true, // Fancy Bold keyboard style ON - F.fancy() / F.bold()
+  reaction: { await: '⏳', done: '💀' }, // Await ⏳ when action dey execute, Complete 💀 when action complete
 
   // ===== SESSION / PAIRING =====
   sessionName: 'Meta',
@@ -33,13 +36,14 @@ module.exports = {
   pairingNumber: '2348102350169', // number wey go receive pairing code
 
   // ===== MODE / SETTINGS =====
-  // IMPORTANT: This na the MAIN mode wey survive Render restart
-  // 'private' = only owner (2348102350169) fit use bot, bot no go reply another person
-  // 'public' = everybody fit use bot
-  // Change am here + push to make am permanent. .private / .public command na for temporary only.
+  // IMPORTANT: This na DEFAULT for FIRST START ONLY - no be force again.
+  // DB (database.json) na truth after first start. ,mode public / ,mode private go win + survive restart.
+  // 'private' = only owner (2348102350169 - person wey pair bot) fit use bot, isOwner ❌ = IGNORE silent
+  // 'public' = everybody fit use bot, Owner & isOwner ✅ = reply
+  // If you want make bot ALWAYS start private after Render restart, delete database.json before restart.
   mode: 'private',
-  forceConfigMode: true,
-  forceConfigPrefix: true,
+  forceConfigMode: false, // FIXED: Was true - e dey force private forever, ,mode public never work. Now false = DB wins.
+  forceConfigPrefix: false, // FIXED: Was true - e dey reset ,setprefix after restart. Now false = DB wins.
   language: 'en',
   timezone: 'Africa/Lagos',
   totalCmds: 300,
