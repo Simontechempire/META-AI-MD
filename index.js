@@ -1,6 +1,6 @@
-// index.js - META AI MD - ALL CONNECTED + BOT STOP REPLYING FIX - BY SIMON TECH
-// FIXED: LID owner + ephemeral text + forceConfig + senderPn + isAdmin LID + debug logs
-// ONE FLOW: Private -> Ban/Mute -> Protection -> Auto -> Protection Commands -> Plugins -> Commands
+// index.js - META AI MD - ALL CONNECTED + PUBLIC FIRST - BY SIMON TECH
+// FIXED: Public first, owner fit change to Private with ,mode private
+// ONE FLOW: Public/Private -> Ban/Mute -> Protection -> Auto -> Protection Commands -> Plugins -> Commands
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
@@ -21,14 +21,12 @@ let isStarting = false;
 let reconnectTimer = null;
 
 // ===== CONNECTED HELPERS - Use F.getMode / F.getPrefix (respects forceConfig) =====
-function getMode(){ return F.getMode ? F.getMode(db, config) : (db.settings?.mode || config.mode || 'private'); }
+function getMode(){ return F.getMode ? F.getMode(db, config) : (db.settings?.mode || config.mode || 'public'); }
 function getPrefix(){ return F.getPrefix ? F.getPrefix(db, config) : (db.settings?.prefix || config.prefix || ','); }
 
 // ===== OWNER CHECK - LID + Pn + ownerLids =====
 function isOwnerCheck(sender, senderPn, db){
-  // New helper from lib/function.js - handles LID
   if (F.isOwnerMessage) {
-    // Build fake m object for helper
     let fakeM = { key: { participant: sender, participantPn: senderPn, remoteJid: sender, remoteJidAlt: senderPn } };
     try { if (F.isOwnerMessage(fakeM, db, config)) return true; } catch(e){}
   }
@@ -40,7 +38,6 @@ function isOwnerCheck(sender, senderPn, db){
   if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
   if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
   if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  // LID list
   if (sender && Array.isArray(config.ownerLids) && config.ownerLids.includes(sender)) return true;
   if (senderPn && Array.isArray(config.ownerLids) && config.ownerLids.includes(senderPn)) return true;
   try{ if(F.isOwner && (F.isOwner(sender, db, config) || F.isOwner(senderPn, db, config))) return true; }catch(e){}
@@ -64,7 +61,7 @@ function loadEngines(){
 }
 loadEngines();
 
-// ===== LOAD COMMANDS - commands/ + plugins/ BOTH, moderator wins =====
+// ===== LOAD COMMANDS =====
 let commands = new Map();
 let functionPlugins = [];
 
@@ -86,15 +83,12 @@ function loadPlugins(){
     console.log(`📁 Found files in ${dirName}/:`, files);
     for(let file of files){
       if(file === 'protection.js') continue;
-      // Skip auto.js / anti.js as array commands - dem na engines, dem get handleAuto/handleAnti
       if(file === 'auto.js' || file === 'anti.js') {
-        // Only load as array if e actually export array - check quickly
         try{
           let fullTmp = path.join(dir, file);
           delete require.cache[require.resolve(fullTmp)];
           let tmp = require(fullTmp);
           if (!Array.isArray(tmp) && !tmp?.name && !tmp?.plugins) continue;
-          // If e be array, fall through to normal load below
           if (!Array.isArray(tmp) && !tmp?.plugins) continue;
         }catch(e){ continue; }
       }
@@ -271,29 +265,26 @@ async function start(){
       } catch(e){ console.log('Group update err:', e.message); }
     });
 
-    // ===== MAIN MESSAGE HANDLER - FIXED LID + EPHEMERAL =====
+    // ===== MAIN MESSAGE HANDLER - PUBLIC FIRST =====
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for(let m of messages){
         try{
           if(!m?.message) continue;
           if (m.key.remoteJid === 'status@broadcast') continue;
           let from = m.key.remoteJid;
-
-          // ===== FIX: LID + Pn - Use helpers from lib/function.js =====
           let sender = F.getSenderJid ? F.getSenderJid(m) : (m.key.participant || m.key.remoteJid);
           let senderPn = F.getSenderPn ? F.getSenderPn(m) : (m.key.participantPn || m.key.remoteJidAlt || sender);
           let senderNum = F.getSenderNumber ? F.getSenderNumber(m) : String(senderPn || sender).split('@')[0].replace(/[^0-9]/g,'');
           let pushname = m.pushName || 'User';
-          let body = F.getText(m); // Now unwraps ephemeralMessage
+          let body = F.getText(m);
           if(!body) {
-            // Debug: log why body empty, so you fit see for logs
-            console.log(`📩 EMPTY BODY - keys: ${Object.keys(m.message || {})} | from: ${senderNum}`);
+            // FIX: protocolMessage / sync - ignore SILENTLY, no spam logs
             continue;
           }
           console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum} (raw: ${sender} | pn: ${senderPn}): ${body.slice(0,80)}`);
           let isGroup = F.isGroup(from);
 
-          // ===== 1. OWNER + SELF - LID FIX =====
+          // ===== 1. OWNER + SELF =====
           let isOwner = isOwnerCheck(sender, senderPn, db);
           let isSelfCommand = false;
           let activePrefix = getPrefix();
@@ -303,24 +294,23 @@ async function start(){
             isOwner = true;
             console.log('✅ Self-command detected, treating as owner');
           }
-          // DEBUG: Show owner check result for Render logs
           console.log(`🔍 OWNER CHECK: senderNum=${senderNum} isOwner=${isOwner} mode=${getMode()} prefix=${activePrefix}`);
 
-          // ===== 2. PRIVATE MODE =====
+          // ===== 2. PRIVATE MODE - only owner pass =====
           let mode = getMode();
           if(mode === 'private' && !isOwner){
             console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
             continue;
           }
 
-          // ===== 3. BAN + MUTE - Check both sender + senderPn =====
+          // ===== 3. BAN + MUTE =====
           if ((db.banned?.includes(senderNum) || db.banned?.includes(String(sender).split('@')[0])) && !isOwner) continue;
           if (isGroup && (db.muted?.[from]?.includes(sender) || db.muted?.[from]?.includes(senderPn)) && !isOwner) {
             try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
             continue;
           }
 
-          // ===== 4. isAdmin ONCE - LID aware =====
+          // ===== 4. isAdmin ONCE =====
           let isAdmin = false;
           if (isGroup) {
             try {
@@ -329,7 +319,7 @@ async function start(){
               isAdmin = !!(me && me.admin);
             } catch(e){}
           }
-          if (isOwner) isAdmin = true; // Owner na admin everywhere
+          if (isOwner) isAdmin = true;
 
           // ===== 5. PROTECTION + AUTO =====
           if(!isSelfCommand){
@@ -352,11 +342,7 @@ async function start(){
 
           // ===== 6. PREFIX + COMMAND PARSE =====
           let usedPrefix = activePrefix;
-          if(!body.startsWith(usedPrefix)) {
-            // Debug: body no start with prefix - log am once
-            console.log(`⏭️ No prefix - body starts with "${body.slice(0,1)}" expected "${usedPrefix}"`);
-            continue;
-          }
+          if(!body.startsWith(usedPrefix)) continue;
           let args = body.slice(usedPrefix.length).trim().split(/ +/);
           let cmdName = (args.shift()||'').toLowerCase();
           let text = args.join(' ');
@@ -369,6 +355,31 @@ async function start(){
               return await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
             }catch(e){ return await reply('Menu error: '+e.message); }
           }
+
+          // ===== 6b. EMERGENCY MODE COMMANDS - Built into index.js, no need owner.js =====
+          // Owner fit change mode anytime: ,mode private / ,mode public / ,mode
+          if(cmdName === 'mode' || cmdName === 'setmode'){
+            if(!isOwner) return await reply(config.messages.ownerOnly);
+            let newMode = (args[0] || '').toLowerCase();
+            if(!newMode) return await reply(`Current mode: *${getMode().toUpperCase()}*\n\nUse:\n${usedPrefix}mode public - Anybody fit use bot\n${usedPrefix}mode private - Only owner fit use bot`);
+            if(!['public','private'].includes(newMode)) return await reply(`❌ Use: ${usedPrefix}mode public OR ${usedPrefix}mode private`);
+            db.settings = db.settings || {};
+            db.settings.mode = newMode;
+            db.mode = newMode;
+            F.saveDB(db);
+            return await reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only owner fit use bot now.' : '🌍 Anybody fit use bot now.'}`);
+          }
+          if(cmdName === 'private' && isOwner){
+            db.settings = db.settings || {};
+            db.settings.mode = 'private'; db.mode = 'private'; F.saveDB(db);
+            return await reply(`✅ Mode changed to *PRIVATE*\n🔒 Only owner fit use bot now.`);
+          }
+          if(cmdName === 'public' && isOwner){
+            db.settings = db.settings || {};
+            db.settings.mode = 'public'; db.mode = 'public'; F.saveDB(db);
+            return await reply(`✅ Mode changed to *PUBLIC*\n🌍 Anybody fit use bot now.`);
+          }
+
           if(cmdName === 'reload' && isOwner){
             loadPlugins();
             return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`);
@@ -385,7 +396,7 @@ async function start(){
             }
           } catch(e){ console.log('Protection cmd err:', e.message); }
 
-          // ===== 9. FUNCTION PLUGINS =====
+                    // ===== 9. FUNCTION PLUGINS =====
           let handled = false;
           for(let fp of functionPlugins){
             try{
@@ -400,7 +411,7 @@ async function start(){
           }
           if(handled) continue;
 
-                  // ===== 10. ARRAY COMMANDS =====
+          // ===== 10. ARRAY COMMANDS =====
           let plugin = commands.get(cmdName);
           if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} ${usedPrefix}${cmdName}\n${fancy('Type')} ${usedPrefix}menu\n\n${config.footer}`);
           if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
