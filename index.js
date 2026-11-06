@@ -17,26 +17,73 @@ let db = F.loadDB(config);
 let isStarting = false;
 let reconnectTimer = null;
 
-// ===== HELPER: STRONG OWNER CHECK =====
-function isOwnerCheck(sender, db){
-  let num = String(sender || '').replace(/[^0-9]/g, '');
+// ===== FIXED: Cached groupMetadata - Bot fast, no double groupMetadata call =====
+let metaCache = new Map(); // gid -> { meta, time }
+async function getGroupMeta(gid){
+  if (!gid || !gid.endsWith('@g.us')) return null;
+  let cached = metaCache.get(gid);
+  if (cached && Date.now() - cached.time < 30000) return cached.meta;
+  try {
+    let meta = await sock.groupMetadata(gid);
+    metaCache.set(gid, { meta, time: Date.now() });
+    return meta;
+  } catch(e){ return cached?.meta || null; }
+}
+function clearMetaCache(gid){ if (gid) metaCache.delete(gid); else metaCache.clear(); }
+// FIXED: Find participant by LID OR PN - shared helper for all plugins
+function findParticipant(meta, uid){
+  if (!meta || !uid) return null;
+  let num = String(uid).split('@')[0].replace(/[^0-9]/g, '');
+  return (meta.participants || []).find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
+}
+
+// ===== HELPER: STRONG OWNER CHECK - Owner = person wey pair the bot =====
+// Ignore F.isOwner as main - check PN + LID against config.ownerNumber + db.owners
+function isOwnerCheck(sender, senderPn, db){
+  let nums = [];
+  if (sender) nums.push(String(sender).split('@')[0].replace(/[^0-9]/g, ''));
+  if (senderPn) nums.push(String(senderPn).split('@')[0].replace(/[^0-9]/g, ''));
+  // Also check sock.user LID/PN? No - owner na NOT bot itself, na person wey pair am
   let owners = [];
   if(config.ownerNumber) owners.push(String(config.ownerNumber).replace(/[^0-9]/g, ''));
   if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
+  if(db.settings?.owner) owners.push(String(db.settings.owner).replace(/[^0-9]/g, ''));
   if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
   if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  // Also try F.isOwner if e work
-  try{ if(F.isOwner && F.isOwner(sender, db)) return true; }catch(e){}
-  return owners.includes(num);
+  return nums.some(n => n && owners.includes(n));
+}
+// FIXED: Admin check - uses cached meta, no slow double call
+async function isAdminCheck(from, sender, senderPn){
+  try {
+    let meta = await getGroupMeta(from);
+    if (!meta) return false;
+    let p = findParticipant(meta, sender) || (senderPn ? findParticipant(meta, senderPn) : null);
+    return !!(p && (p.admin === 'admin' || p.admin === 'superadmin'));
+  } catch(e){ return false; }
+}
+async function isBotAdminCheck(from){
+  try {
+    let meta = await getGroupMeta(from);
+    if (!meta || !sock?.user?.id) return false;
+    let myNum = String(sock.user.id).split(':')[0].replace(/[^0-9]/g, '');
+    let myPn = sock.user.id;
+    let myLid = String(sock.user.lid || '').split('@')[0].replace(/[^0-9]/g, '');
+    let me = (meta.participants || []).find(x => x.id === myPn || x.phoneNumber === myPn || String(x.phoneNumber || '').split('@')[0] === myNum || String(x.id || '').split('@')[0] === myNum || (myLid && String(x.id || '').split('@')[0] === myLid));
+    return !!(me && (me.admin === 'admin' || me.admin === 'superadmin'));
+  } catch(e){ return false; }
 }
 function getMode(db){
-  // FIXED: Respect config.js forceConfigMode - config must win over old DB
-  if(config?.forceConfigMode && config?.mode) return config.mode;
-  // Check all places where mode fit dey - private fit dey for different key
+  // FIXED: DB FIRST - ,mode private/public for DB must win. Config na only default for first start.
   if(db.settings?.mode) return db.settings.mode;
   if(db.mode) return db.mode;
   if(db.settings?.self) return 'private';
+  if(config?.forceConfigMode && config?.mode) return config.mode;
   return config?.mode || 'public';
+}
+function getPrefix(db){
+  if(db.settings?.prefix) return db.settings.prefix;
+  if(config?.forceConfigPrefix && config?.prefix) return config.prefix;
+  return config?.prefix || ',';
 }
 
 // ===== FANCY BOLD FONT =====
@@ -46,11 +93,28 @@ function fancy(text){
 }
 F.fancy = fancy;
 F.bold = fancy;
+F.getGroupMeta = getGroupMeta;
+F.findParticipant = findParticipant;
+F.isAdminCheck = isAdminCheck;
+F.isBotAdminCheck = isBotAdminCheck;
+F.getMode = getMode;
+F.getPrefix = getPrefix;
+
+// ===== REACTION: Await ⏳ / Complete 💀 =====
+async function reactAwait(m){
+  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '⏳', key: m.key } }); } catch(e){}
+}
+async function reactDone(m){
+  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '💀', key: m.key } }); } catch(e){}
+}
+F.reactAwait = reactAwait;
+F.reactDone = reactDone;
 
 // ===== LOAD PLUGINS - SUPPORTS ARRAY + FUNCTION =====
-let antiMod = null, autoMod = null;
+let antiMod = null, autoMod = null, protectionMod = null;
 try{ antiMod = require('./plugins/anti.js'); }catch(e){}
 try{ autoMod = require('./plugins/auto.js'); }catch(e){}
+try{ protectionMod = require('./plugins/protection.js'); }catch(e){}
 
 let commands = new Map();
 let functionPlugins = [];
@@ -90,8 +154,12 @@ function loadPlugins(){
       }
       for(let p of list){
         if(!p || !p.name || typeof p.run !== 'function') continue;
-        commands.set(p.name.toLowerCase(), p);
-        if(p.aliases) for(let a of p.aliases) commands.set(a.toLowerCase(), p);
+        // FIXED: No overwrite silently - first wins, log duplicate so you know group.js vs moderator.js fight
+        if (commands.has(p.name.toLowerCase())) console.log(`⚠️ Duplicate command ${p.name} in ${file} - keeping first, skipping this one`);
+        else {
+          commands.set(p.name.toLowerCase(), p);
+          if(p.aliases) for(let a of p.aliases) if(!commands.has(a.toLowerCase())) commands.set(a.toLowerCase(), p);
+        }
       }
       console.log(`✅ Loaded ${file} - ${list.length} cmds`);
     }catch(e){ console.log('❌ Plugin failed:', file, e.message); }
@@ -99,6 +167,7 @@ function loadPlugins(){
   console.log(`Total array commands: ${commands.size} | Function plugins: ${functionPlugins.length}`);
   try{ antiMod = require('./plugins/anti.js'); }catch(e){}
   try{ autoMod = require('./plugins/auto.js'); }catch(e){}
+  try{ protectionMod = require('./plugins/protection.js'); }catch(e){}
 }
 loadPlugins();
 
@@ -181,7 +250,7 @@ async function start(){
       if(connection === 'open'){
         isStarting = false;
         console.log('META AI MD CONNECTED ✅');
-        try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db); }catch(e){}
+        try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db, config); }catch(e){}
       }
     });
 
@@ -190,7 +259,7 @@ async function start(){
       try {
         if (messages[0]?.key?.remoteJid === 'status@broadcast') {
           if(getMode(db) === 'private') return;
-          if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db);
+          if (autoMod?.handleStatus) for (let s of messages) await autoMod.handleStatus(sock, s, db, F, config);
         }
       } catch(e){}
     });
@@ -199,6 +268,7 @@ async function start(){
     sock.ev.on('group-participants.update', async (u) => {
       try {
         if(getMode(db) === 'private') return;
+        clearMetaCache(u.id);
         let from = u.id;
         let g = db.group?.[from];
         if (!g) return;
@@ -223,13 +293,22 @@ async function start(){
       } catch(e){}
     });
 
+    // ===== ANTI DELETE - via protection.js =====
+    sock.ev.on('messages.update', async (updates) => {
+      try {
+        if (getMode(db) === 'private') return;
+        if (protectionMod?.handleAntiDelete) await protectionMod.handleAntiDelete(sock, updates, db, F);
+      } catch(e){}
+    });
+
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for(let m of messages){
         if(!m?.message) continue;
         if (m.key.remoteJid === 'status@broadcast') continue;
         let from = m.key.remoteJid;
         let sender = m.key.participant || m.key.remoteJid;
-        let senderNum = sender.split('@')[0];
+        let senderPn = m.key.participantPn || m.key.remoteJidAlt || '';
+        let senderNum = (senderPn || sender).split('@')[0];
         let pushname = m.pushName || 'User';
         let body = F.getText(m);
         if(!body) continue;
@@ -237,10 +316,11 @@ async function start(){
         let isGroup = F.isGroup(from);
 
         // ===== FIX 1: STRONG OWNER CHECK - BEFORE EVERYTHING =====
-        let isOwner = isOwnerCheck(sender, db);
+        // Owner = person wey pair the bot (config.ownerNumber / db.owners) - check PN + LID
+        let isOwner = isOwnerCheck(sender, senderPn, db);
         let isSelfCommand = false;
         if(m.key.fromMe){
-          let hasPrefix = config.prefixes.some(p => body.startsWith(p));
+          let hasPrefix = (config.prefixes || [getPrefix(db)]).some(p => body.startsWith(p));
           if(!hasPrefix) continue;
           isSelfCommand = true;
           isOwner = true;
@@ -248,8 +328,8 @@ async function start(){
         }
 
         // ===== FIX 2: PRIVATE MODE - BLOCK EVERYTHING FIRST =====
-        // This MUST be before anti, auto, forward, menu, plugins
-        // If na private and no be owner, bot go silent - NO reply at all
+        // Private: Owner ✅ = reply, isOwner ❌ = IGNORE silent - NO reply, NO reaction
+        // Public: Everybody = reply
         let mode = getMode(db);
         if(mode === 'private' && !isOwner){
           console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
@@ -257,42 +337,63 @@ async function start(){
         }
 
         if (db.banned?.includes(senderNum) && !isOwner) continue;
+        // Also check banned by LID/PN both forms
+        if (db.banned?.includes(sender.split('@')[0]) && !isOwner) continue;
         if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
           try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
           continue;
         }
         if(!isSelfCommand){
-          try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
-          try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db); } catch(e){}
+          // FIXED: Connect protection.js FIRST, then anti.js - but no double warn: protection returns true = blocked
+          try { if (protectionMod?.handleProtection) { let blocked = await protectionMod.handleProtection(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){ console.log('Protection err:', e.message); }
+          try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
+          try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db, F, config); } catch(e){}
           if (db.auto?.autoforward && !isOwner) {
             try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
           }
         }
-        let usedPrefix = config.prefixes.find(p => body.startsWith(p));
+        let usedPrefix = (config.prefixes || [getPrefix(db)]).find(p => body.startsWith(p));
         if(!usedPrefix) continue;
         let args = body.slice(usedPrefix.length).trim().split(/ +/);
         let cmdName = (args.shift()||'').toLowerCase();
         let text = args.join(' ');
-        // No second private check here - already blocked for top
+        // FIXED: Compute isAdmin ONCE with cached meta - pass to all plugins, no slow double call
+        let isAdmin = false;
+        let isBotAdmin = false;
+        if (isGroup) {
+          isAdmin = await isAdminCheck(from, sender, senderPn);
+          isBotAdmin = await isBotAdminCheck(from);
+        }
         const reply = async (t, opts={}) => sock.sendMessage(from, { text: t }, { quoted: m, ...opts });
         const fancyReply = async (t, opts={}) => sock.sendMessage(from, { text: fancy(t) }, { quoted: m, ...opts });
         if(cmdName === 'menu' || cmdName === 'help' || cmdName === 'allmenu'){
+          await reactAwait(m);
           try{
             let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting });
-            return await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
-          }catch(e){ return await reply('Menu error: '+e.message); }
+            await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
+            await reactDone(m);
+            return;
+          }catch(e){ await reactDone(m); return await reply('Menu error: '+e.message); }
         }
-        if(cmdName === 'reload' && isOwner){ loadPlugins(); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
+        if(cmdName === 'reload' && isOwner){ await reactAwait(m); loadPlugins(); await reactDone(m); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
 
-        let ctx = { sock, m, from, sender, senderNum, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply };
+        let ctx = { sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant };
+        // FIXED: Protection commands (antilink on/off etc) - handle BEFORE functionPlugins
+        try {
+          if (protectionMod?.handleCommands) {
+            let handledProt = await protectionMod.handleCommands(sock, m, ctx);
+            if (handledProt) { F.saveDB(db); continue; }
+          }
+        } catch(e){ console.log('Protection cmd err:', e.message); }
         let handled = false;
         for(let fp of functionPlugins){
           try{
+            await reactAwait(m);
             let r = await Promise.race([
               fp.fn(sock, m, ctx),
               new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
             ]);
-            if(r){ handled = true; F.saveDB(db); break; }
+            if(r){ handled = true; await reactDone(m); F.saveDB(db); break; }
           }catch(e){
             if(e.message !== 'timeout') console.log('FUNC PLUGIN ERR', fp.file, cmdName, e.message);
           }
@@ -303,13 +404,16 @@ async function start(){
         if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
         if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
         if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
+               // FIXED: Reaction Await ⏳ -> Complete 💀 for every command
+        await reactAwait(m);
         try{
           await Promise.race([
-            plugin.run({ sock, m, from, sender, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isGroup, db, config, F, reply, fancy, fancyReply }),
+            plugin.run({ sock, m, from, sender, senderNum, senderPn, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant }),
             new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
           ]);
+          await reactDone(m);
           F.saveDB(db);
-        }catch(e){ console.log('CMD ERR', cmdName, e.message); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
+        }catch(e){ console.log('CMD ERR', cmdName, e.message); await reactDone(m); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
       }
     });
   }catch(e){ console.log('Start failed', e.message); isStarting = false; reconnectTimer = setTimeout(()=>{ reconnectTimer=null; start(); }, 3000); }
