@@ -1,5 +1,5 @@
 // config.js - META AI MD by Simon Tech / META
-// FIXED - Private + Single Prefix
+// FIXED - Public First + Owner fit change to Private with ,mode private
 
 module.exports = {
   // ===== BOT INFO =====
@@ -8,16 +8,22 @@ module.exports = {
   ownerName: 'META',
   ownerAlias: 'Simon Tech',
   ownerNumber: '2348102350169',
-  owners: ['2348102350169'],
+  owners: ['2348102350169', '23223458631686'],
+  ownerLids: ['23223458631686'],
   ownerJid: '2348102350169@s.whatsapp.net',
   botNumber: '',
 
   // ===== PREFIX - FIXED =====
   // CHANGE ONLY HERE! Put your new prefix here
-  // If you want , put ',' - If you want ! put '!'
-  // DO NOT put many, put only ONE
   prefix: ',', // <-- YOUR NEW PREFIX HERE
   prefixes: [','], // <-- MUST MATCH prefix above, same one only
+
+  // ===== FORCE CONFIG - PUBLIC FIRST SYSTEM =====
+  // forceConfigPrefix: true = prefix always come from here, database no fit change am
+  // forceConfigMode: FALSE = owner fit change mode with ,mode public / ,mode private
+  // If you put forceConfigMode: true, ,mode command go NEVER work - e go always force back
+  forceConfigPrefix: true,
+  forceConfigMode: false,
 
   // ===== STYLE / FOOTER =====
   footer: '©️ created by Simon tech inc',
@@ -35,7 +41,10 @@ module.exports = {
   pairingNumber: '2348102350169',
 
   // ===== MODE / SETTINGS =====
-  mode: 'private', // private = only you fit use bot
+  // Bot ALWAYS start PUBLIC - anybody fit use am
+  // Owner go change am later with: ,mode private
+  // To go back public: ,mode public
+  mode: 'public',
   language: 'en',
   timezone: 'Africa/Lagos',
   totalCmds: 300,
