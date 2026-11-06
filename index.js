@@ -1,4 +1,4 @@
-// index.js - META AI MD - FIXED PRIVATE MODE - BY SIMON TECH
+// index.js - META AI MD - BY SIMON TECH
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -17,7 +17,7 @@ let db = F.loadDB(config);
 let isStarting = false;
 let reconnectTimer = null;
 
-// ===== FIXED: Cached groupMetadata - Bot fast, no double groupMetadata call =====
+// ===== Cached groupMetadata - Bot fast, no double call =====
 let metaCache = new Map(); // gid -> { meta, time }
 async function getGroupMeta(gid){
   if (!gid || !gid.endsWith('@g.us')) return null;
@@ -30,20 +30,25 @@ async function getGroupMeta(gid){
   } catch(e){ return cached?.meta || null; }
 }
 function clearMetaCache(gid){ if (gid) metaCache.delete(gid); else metaCache.clear(); }
-// FIXED: Find participant by LID OR PN - shared helper for all plugins
+// Find participant by LID OR PN - shared helper for all plugins
 function findParticipant(meta, uid){
   if (!meta || !uid) return null;
   let num = String(uid).split('@')[0].replace(/[^0-9]/g, '');
   return (meta.participants || []).find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
 }
+// Display PN, not LID - for @mentions in text
+function displayNum(meta, uid){
+  if (!uid) return '';
+  let p = meta ? findParticipant(meta, uid) : null;
+  if (p?.phoneNumber) return String(p.phoneNumber).split('@')[0].replace(/[^0-9]/g, '');
+  return String(uid).split('@')[0].replace(/[^0-9]/g, '');
+}
 
-// ===== HELPER: STRONG OWNER CHECK - Owner = person wey pair the bot =====
-// Ignore F.isOwner as main - check PN + LID against config.ownerNumber + db.owners
+// ===== STRONG OWNER CHECK - Owner = person who paired the bot =====
 function isOwnerCheck(sender, senderPn, db){
   let nums = [];
   if (sender) nums.push(String(sender).split('@')[0].replace(/[^0-9]/g, ''));
   if (senderPn) nums.push(String(senderPn).split('@')[0].replace(/[^0-9]/g, ''));
-  // Also check sock.user LID/PN? No - owner na NOT bot itself, na person wey pair am
   let owners = [];
   if(config.ownerNumber) owners.push(String(config.ownerNumber).replace(/[^0-9]/g, ''));
   if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
@@ -52,7 +57,7 @@ function isOwnerCheck(sender, senderPn, db){
   if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
   return nums.some(n => n && owners.includes(n));
 }
-// FIXED: Admin check - uses cached meta, no slow double call
+// Admin check - uses cached meta
 async function isAdminCheck(from, sender, senderPn){
   try {
     let meta = await getGroupMeta(from);
@@ -73,7 +78,7 @@ async function isBotAdminCheck(from){
   } catch(e){ return false; }
 }
 function getMode(db){
-  // FIXED: DB FIRST - ,mode private/public for DB must win. Config na only default for first start.
+  // DB FIRST - ,mode private/public must win. Config is only default for first start.
   if(db.settings?.mode) return db.settings.mode;
   if(db.mode) return db.mode;
   if(db.settings?.self) return 'private';
@@ -83,7 +88,7 @@ function getMode(db){
 function getPrefix(db){
   if(db.settings?.prefix) return db.settings.prefix;
   if(config?.forceConfigPrefix && config?.prefix) return config.prefix;
-  return config?.prefix || ',';
+  return config?.prefix || '.';
 }
 
 // ===== FANCY BOLD FONT =====
@@ -95,17 +100,18 @@ F.fancy = fancy;
 F.bold = fancy;
 F.getGroupMeta = getGroupMeta;
 F.findParticipant = findParticipant;
+F.displayNum = displayNum;
 F.isAdminCheck = isAdminCheck;
 F.isBotAdminCheck = isBotAdminCheck;
 F.getMode = getMode;
 F.getPrefix = getPrefix;
 
-// ===== REACTION: Await ⏳ / Complete 💀 =====
+// ===== REACTION: Await / Complete =====
 async function reactAwait(m){
   try { await sock.sendMessage(m.key.remoteJid, { react: { text: '⏳', key: m.key } }); } catch(e){}
 }
 async function reactDone(m){
-  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '💀', key: m.key } }); } catch(e){}
+  try { await sock.sendMessage(m.key.remoteJid, { react: { text: '✅', key: m.key } }); } catch(e){}
 }
 F.reactAwait = reactAwait;
 F.reactDone = reactDone;
@@ -125,7 +131,7 @@ function loadPlugins(){
   let dir = path.join(__dirname, 'plugins');
   if(!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'test.js'), `module.exports = [{ name: 'testping', run: async ({reply}) => reply('✅ Loader dey work!') }];`);
+    fs.writeFileSync(path.join(dir, 'test.js'), `module.exports = [{ name: 'testping', run: async ({reply}) => reply('✅ Loader is working!') }];`);
   }
   let files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
   console.log('📁 Found files in plugins/:', files);
@@ -154,7 +160,6 @@ function loadPlugins(){
       }
       for(let p of list){
         if(!p || !p.name || typeof p.run !== 'function') continue;
-        // FIXED: No overwrite silently - first wins, log duplicate so you know group.js vs moderator.js fight
         if (commands.has(p.name.toLowerCase())) console.log(`⚠️ Duplicate command ${p.name} in ${file} - keeping first, skipping this one`);
         else {
           commands.set(p.name.toLowerCase(), p);
@@ -272,22 +277,25 @@ async function start(){
         let from = u.id;
         let g = db.group?.[from];
         if (!g) return;
+        // Use cached meta for PN display - avoid LID in welcome/goodbye
+        let meta = await getGroupMeta(from).catch(()=>null);
         for (let p of u.participants) {
+          let pnNum = displayNum(meta, p);
           if (u.action === 'add' && (g.welcome || db.auto?.autowelcome)) {
-            let msg = (g.welcomeMsg || '👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g, `@${p.split('@')[0]}`).replace(/\{group\}/g, u.subject || 'group');
+            let msg = (g.welcomeMsg || '👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g, `@${pnNum}`).replace(/\{group\}/g, u.subject || 'group');
             await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'remove' && (g.goodbye || db.auto?.autogoodbye)) {
-            let msg = (g.goodbyeMsg || '👋 Bye @user, we go miss you 😢').replace(/@user/g, `@${p.split('@')[0]}`);
+            let msg = (g.goodbyeMsg || '👋 Goodbye @user, we will miss you').replace(/@user/g, `@${pnNum}`);
             await sock.sendMessage(from, { text: msg, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'promote' && db.anti?.antipromote) {
             await sock.groupParticipantsUpdate(from, [p], 'demote').catch(()=>{});
-            await sock.sendMessage(from, { text: `🚫 Anti-Promote: @${p.split('@')[0]} demoted back`, mentions: [p] }).catch(()=>{});
+            await sock.sendMessage(from, { text: `🚫 Anti-Promote: @${pnNum} demoted back`, mentions: [p] }).catch(()=>{});
           }
           if (u.action === 'demote' && db.anti?.antidemote) {
             await sock.groupParticipantsUpdate(from, [p], 'promote').catch(()=>{});
-            await sock.sendMessage(from, { text: `✅ Anti-Demote: @${p.split('@')[0]} promoted back`, mentions: [p] }).catch(()=>{});
+            await sock.sendMessage(from, { text: `✅ Anti-Demote: @${pnNum} promoted back`, mentions: [p] }).catch(()=>{});
           }
         }
       } catch(e){}
@@ -297,6 +305,7 @@ async function start(){
     sock.ev.on('messages.update', async (updates) => {
       try {
         if (getMode(db) === 'private') return;
+        clearMetaCache(updates?.[0]?.key?.remoteJid);
         if (protectionMod?.handleAntiDelete) await protectionMod.handleAntiDelete(sock, updates, db, F);
       } catch(e){}
     });
@@ -315,8 +324,7 @@ async function start(){
         console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
         let isGroup = F.isGroup(from);
 
-        // ===== FIX 1: STRONG OWNER CHECK - BEFORE EVERYTHING =====
-        // Owner = person wey pair the bot (config.ownerNumber / db.owners) - check PN + LID
+        // ===== STRONG OWNER CHECK - BEFORE EVERYTHING =====
         let isOwner = isOwnerCheck(sender, senderPn, db);
         let isSelfCommand = false;
         if(m.key.fromMe){
@@ -327,29 +335,33 @@ async function start(){
           console.log('✅ Self-command detected, treating as owner');
         }
 
-        // ===== FIX 2: PRIVATE MODE - BLOCK EVERYTHING FIRST =====
-        // Private: Owner ✅ = reply, isOwner ❌ = IGNORE silent - NO reply, NO reaction
-        // Public: Everybody = reply
+        // ===== PRIVATE MODE - BLOCK EVERYTHING FIRST =====
+        // Private: Owner = reply, Non-owner = IGNORE silent - NO reply, NO reaction
+        // Public: Everyone = reply
         let mode = getMode(db);
         if(mode === 'private' && !isOwner){
           console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
           continue;
         }
 
+        // Banned check - check both LID and PN forms
         if (db.banned?.includes(senderNum) && !isOwner) continue;
-        // Also check banned by LID/PN both forms
         if (db.banned?.includes(sender.split('@')[0]) && !isOwner) continue;
         if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
           try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
           continue;
         }
         if(!isSelfCommand){
-          // FIXED: Connect protection.js FIRST, then anti.js - but no double warn: protection returns true = blocked
+          // Protection FIRST, then Anti - protection returns true = blocked, no double-warn
           try { if (protectionMod?.handleProtection) { let blocked = await protectionMod.handleProtection(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){ console.log('Protection err:', e.message); }
           try { if (antiMod?.handleAnti) { let blocked = await antiMod.handleAnti(sock, m, db, F, config); if (blocked) { F.saveDB(db); continue; } } } catch(e){}
           try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db, F, config); } catch(e){}
           if (db.auto?.autoforward && !isOwner) {
-            try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
+            try {
+              let pn = senderPn || sender;
+              let pnNum = String(pn).split('@')[0];
+              await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${pnNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [pn] });
+            } catch(e){}
           }
         }
         let usedPrefix = (config.prefixes || [getPrefix(db)]).find(p => body.startsWith(p));
@@ -357,7 +369,7 @@ async function start(){
         let args = body.slice(usedPrefix.length).trim().split(/ +/);
         let cmdName = (args.shift()||'').toLowerCase();
         let text = args.join(' ');
-        // FIXED: Compute isAdmin ONCE with cached meta - pass to all plugins, no slow double call
+        // Compute isAdmin ONCE with cached meta - pass to all plugins
         let isAdmin = false;
         let isBotAdmin = false;
         if (isGroup) {
@@ -372,19 +384,23 @@ async function start(){
             let menuText = getMenu({ ownerName: config.ownerAlias, prefix: usedPrefix, botUser: config.botName, hosting: config.hosting });
             await sock.sendMessage(from, { image: { url: MENU_PFP }, caption: menuText }, { quoted: m });
             await reactDone(m);
-            return;
-          }catch(e){ await reactDone(m); return await reply('Menu error: '+e.message); }
+            continue;
+          }catch(e){ await reactDone(m); await reply('Menu error: '+e.message); continue; }
         }
-        if(cmdName === 'reload' && isOwner){ await reactAwait(m); loadPlugins(); await reactDone(m); return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); }
+        if(cmdName === 'reload' && isOwner){ await reactAwait(m); loadPlugins(); await reactDone(m); await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`); continue; }
 
-        let ctx = { sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant };
-        // FIXED: Protection commands (antilink on/off etc) - handle BEFORE functionPlugins
+        let ctx = { sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant, displayNum };
+              // Protection commands (antilink on/off etc) - handle BEFORE functionPlugins
         try {
           if (protectionMod?.handleCommands) {
             let handledProt = await protectionMod.handleCommands(sock, m, ctx);
             if (handledProt) { F.saveDB(db); continue; }
           }
         } catch(e){ console.log('Protection cmd err:', e.message); }
+
+        // ===== REMAINING ONES - AFTER PROTECTION COMMANDS =====
+
+        // 1. Function plugins - e.g. plugins that export a function, not array
         let handled = false;
         for(let fp of functionPlugins){
           try{
@@ -400,25 +416,40 @@ async function start(){
         }
         if(handled) continue;
 
+        // 2. Array plugins - normal commands from plugins/*.js
         let plugin = commands.get(cmdName);
-        if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} .${cmdName}\n${fancy('Type')} .menu\n\n${config.footer}`);
-        if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
-        if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
-               // FIXED: Reaction Await ⏳ -> Complete 💀 for every command
+        if(!plugin) { await reply(`❌ ${fancy('Unknown command:')} ${usedPrefix}${cmdName}\n${fancy('Type')} ${usedPrefix}menu\n\n${config.footer}`); continue; }
+        if(plugin.ownerOnly && !isOwner) { await reply(config.messages.ownerOnly); continue; }
+        if(plugin.groupOnly && !isGroup) { await reply(config.messages.groupOnly); continue; }
+
+        // 3. Reaction Await -> Complete for every command
         await reactAwait(m);
         try{
           await Promise.race([
-            plugin.run({ sock, m, from, sender, senderNum, senderPn, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant }),
-            new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
+            plugin.run({ sock, m, from, sender, senderNum, senderPn, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isBotAdmin, isGroup, db, config, F, reply, fancy, fancyReply, reactAwait, reactDone, getGroupMeta, findParticipant, displayNum }),
+            new Promise((_,rej)=>setTimeout(()=>rej(new Error('Command timeout')), 15000))
           ]);
           await reactDone(m);
           F.saveDB(db);
-        }catch(e){ console.log('CMD ERR', cmdName, e.message); await reactDone(m); await reply(`${config.messages.error}\n${e.message}\n\n${config.footer}`); }
+        }catch(e){
+          console.log('CMD ERR', cmdName, e.message);
+          await reactDone(m);
+          if (e.message === 'Command timeout') await reply('⏳ Command timed out. Try again.');
+          else await reply(`❌ Error: ${e.message}`);
+        }
       }
     });
-  }catch(e){ console.log('Start failed', e.message); isStarting = false; reconnectTimer = setTimeout(()=>{ reconnectTimer=null; start(); }, 3000); }
-}
-start();
 
-process.on('uncaughtException', e=>console.log('Uncaught:', e.message));
-process.on('unhandledRejection', e=>console.log('Rejection:', e.message));
+  }catch(e){
+    console.log('Start error:', e.message);
+    isStarting = false;
+    if(!reconnectTimer){
+      reconnectTimer = setTimeout(()=>{ reconnectTimer = null; start(); }, 5000);
+    }
+  }
+}
+
+process.on('unhandledRejection', (e) => console.log('Unhandled:', e?.message || e));
+process.on('uncaughtException', (e) => console.log('Uncaught:', e?.message || e));
+
+start();
