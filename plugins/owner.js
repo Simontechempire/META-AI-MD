@@ -2,13 +2,34 @@
 // FIXED - Public First + ,mode actually changes mode now
 
 function getRealMode(db, config){
-  // FIX: fallback public, not private - use F.getMode logic
+  // FIXED ERROR 1: DB must win - na wetin user change with ,mode command. Config na only default for first start.
+  if (db?.settings?.mode) return db.settings.mode;
+  if (db?.mode) return db.mode;
   if (config?.forceConfigMode && config?.mode) return config.mode;
-  return db?.settings?.mode || db?.mode || config?.mode || 'public';
+  return config?.mode || 'public';
 }
 function getRealPrefix(db, config){
+  // FIXED ERROR 1: Same for prefix - DB first, so ,setprefix no go reset
+  if (db?.settings?.prefix) return db.settings.prefix;
   if (config?.forceConfigPrefix && config?.prefix) return config.prefix;
-  return db?.settings?.prefix || config?.prefix || ',';
+  return config?.prefix || ',';
+}
+// FIXED ERROR 2: Ban must store both LID + PN so e go match for DM and group
+function getBanNums(ctx, target){
+  let nums = [];
+  let raw = String(target || '').split('@')[0].replace(/[^0-9]/g, '');
+  if (raw) nums.push(raw);
+  // If target na LID, try get real PN from quoted / mentioned context
+  try {
+    let ctxInfo = ctx.m?.message?.extendedTextMessage?.contextInfo || ctx.m?.message?.imageMessage?.contextInfo || {};
+    let pn = String(ctxInfo.participantPn || ctxInfo.mentionedJid?.[0] || '').split('@')[0].replace(/[^0-9]/g, '');
+    // Only add if e look like real phone (different from LID and starts with country code)
+    if (pn && pn !== raw) nums.push(pn);
+    // Also check quoted participantPn
+    let qPn = String(ctx.m?.message?.extendedTextMessage?.contextInfo?.quotedMessage ? ctxInfo.participantPn || '' : '').split('@')[0].replace(/[^0-9]/g, '');
+    if (qPn && qPn !== raw && !nums.includes(qPn)) nums.push(qPn);
+  } catch(e){}
+  return nums;
 }
 
 module.exports = [
@@ -93,6 +114,8 @@ module.exports = [
     if (newPrefix.length > 2) return reply('❌ Prefix too long. Use 1 char like , ! . #');
     config.prefix = newPrefix;
     config.prefixes = [newPrefix];
+    // FIXED: Turn off force so DB go win after restart, no reset to old config prefix
+    config.forceConfigPrefix = false;
     if (!db.settings) db.settings = {};
     db.settings.prefix = newPrefix;
     db.settings.prefixes = [newPrefix];
@@ -173,26 +196,28 @@ module.exports = [
 },
 {
   name: 'ban', category: 'owner', ownerOnly: true,
-  run: async ({ reply, m, F, args, prefix, db }) => {
+  run: async (ctx) => {
+    let { reply, m, F, args, prefix, db } = ctx;
     let target = F.getTarget(m, args);
     if (!target) return reply(`Usage: ${prefix}ban @user`);
     if (!db.banned) db.banned = [];
-    let num = target.split('@')[0].replace(/[^0-9]/g,'');
-    if (!db.banned.includes(num)) db.banned.push(num);
+    let nums = getBanNums(ctx, target);
+    for (let num of nums) if (!db.banned.includes(num)) db.banned.push(num);
     if (F) F.saveDB(db);
-    return reply(`🚫 Banned @${num} - bot no go reply am again`);
+    return reply(`🚫 Banned @${nums[0]} - bot no go reply am again`);
   }
 },
 {
   name: 'unban', category: 'owner', ownerOnly: true,
-  run: async ({ reply, m, F, args, db, prefix }) => {
+  run: async (ctx) => {
+    let { reply, m, F, args, db, prefix } = ctx;
     let target = F.getTarget(m, args);
     if (!target) return reply(`Usage: ${prefix}unban @user`);
     if (!db.banned) db.banned = [];
-    let num = target.split('@')[0].replace(/[^0-9]/g,'');
-    db.banned = db.banned.filter(x=>x!==num);
+    let nums = getBanNums(ctx, target);
+    db.banned = db.banned.filter(x=>!nums.includes(x));
     if (F) F.saveDB(db);
-    return reply(`✅ Unbanned @${num}`);
+    return reply(`✅ Unbanned @${nums[0]}`);
   }
 },
 {
@@ -233,6 +258,7 @@ module.exports = [
   name: 'delowner', category: 'owner', ownerOnly: true,
   run: async ({ reply, args, db, F, prefix }) => {
     let num = F.cleanNumber(args[0]);
+    if (!num) return reply(`Usage: ${prefix}delowner 2348102350169`);
     if (!db.owners) db.owners = ['2348102350169'];
     db.owners = db.owners.filter(x=>x!==num);
     if (F) F.saveDB(db);
@@ -252,6 +278,8 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'private';
     db.mode = 'private';
+    // FIXED: Also update config in memory + turn off force, so index.js go see am immediately
+    if (config) { config.mode = 'private'; config.forceConfigMode = false; }
     if (F && F.saveDB) F.saveDB(db);
     return reply(`🔒 Bot now *PRIVATE* - Only owner fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
   }
@@ -262,6 +290,8 @@ module.exports = [
     db.settings = db.settings || {};
     db.settings.mode = 'public';
     db.mode = 'public';
+    // FIXED: Also update config in memory + turn off force
+    if (config) { config.mode = 'public'; config.forceConfigMode = false; }
     if (F && F.saveDB) F.saveDB(db);
     return reply(`🌍 Bot now *PUBLIC* - Everybody fit use am.\n\nYour prefix still be: ${prefix}\nTry: ${prefix}menu`);
   }
@@ -275,6 +305,8 @@ module.exports = [
       db.settings = db.settings || {};
       db.settings.mode = newMode;
       db.mode = newMode;
+      // FIXED: Also update config in memory + turn off force, so getRealMode + index.js go see new mode
+      if (config) { config.mode = newMode; config.forceConfigMode = false; }
       if (F && F.saveDB) F.saveDB(db);
       return reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only owner fit use bot now.' : '🌍 Anybody fit use bot now.'}\n\nPrefix: ${prefix}\nCheck with: ${prefix}mode`);
     }
@@ -290,6 +322,6 @@ module.exports = [
 },
 {
   name: 'repo', aliases: ['sc', 'script'], category: 'owner',
-  run: async ({ reply }) => { return reply('📦 *META AI MD REPO*\n\nGitHub: https://github.com/SimonTech/META-AI-MD\nOwner: Simon Tech\n\n⭐ Star the repo!'); }
+  run: async ({ reply }) => { return reply('📦 *META AI MD REPO*\n\nGitHub: https://github.com/Simontechempire/META-AI-MD\nOwner: Simon Tech\n\n⭐ Star the repo!'); }
 },
 ];
