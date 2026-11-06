@@ -3,13 +3,26 @@
 
 function save(db, F){ if (F) F.saveDB(db); }
 
+// FIXED ERROR 1+2: LID fix helper - check id OR phoneNumber OR participantPn
+function findParticipant(md, uid){
+  if (!uid) return null;
+  let num = String(uid).split('@')[0].replace(/[^0-9]/g, '');
+  return (md.participants || []).find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
+}
+function resolveTarget(md, target){
+  let p = findParticipant(md, target);
+  return p ? p.id : target;
+}
+
 async function checkAdmin(ctx){
   // Use ctx.isAdmin from index.js first (fast), fallback to metadata
   if (ctx.isOwner) return true;
   if (ctx.isAdmin) return true;
   try {
     let md = await ctx.sock.groupMetadata(ctx.from);
-    let p = md.participants.find(x=>x.id===ctx.sender);
+    let p = findParticipant(md, ctx.sender);
+    // Also try senderNum if sender na LID/PN mismatch
+    if (!p && ctx.senderNum) p = findParticipant(md, ctx.senderNum);
     if (p && p.admin) return true;
   } catch(e){}
   await ctx.reply('❌ Only admin fit use this.');
@@ -18,8 +31,10 @@ async function checkAdmin(ctx){
 async function checkBotAdmin(sock, from, reply){
   try {
     let md = await sock.groupMetadata(from);
-    let myId = sock.user.id.split(':')[0];
-    let me = md.participants.find(p => p.id.split('@')[0] === myId || p.id === sock.user.id);
+    let myNum = String(sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
+    let myPn = sock.user?.id || '';
+    let myLid = String(sock.user?.lid || '').split('@')[0].replace(/[^0-9]/g, '');
+    let me = (md.participants || []).find(p => p.id === myPn || p.phoneNumber === myPn || String(p.phoneNumber || '').split('@')[0] === myNum || String(p.id || '').split('@')[0] === myNum || (myLid && String(p.id || '').split('@')[0] === myLid));
     if (me && me.admin) return true;
     await reply('❌ Bot must be admin to do this. Make bot admin first.');
     return false;
@@ -42,9 +57,11 @@ module.exports = [
     // No kick admin / owner
     try {
       let md = await ctx.sock.groupMetadata(ctx.from);
-      let tp = md.participants.find(p=>p.id===target);
+      let realTarget = resolveTarget(md, target);
+      let tp = findParticipant(md, realTarget);
       if (tp?.admin) return ctx.reply('❌ Cannot kick admin. Demote first.');
-      if (target === ctx.sender) return ctx.reply('❌ You no fit kick yourself.');
+      if (realTarget === ctx.sender) return ctx.reply('❌ You no fit kick yourself.');
+      target = realTarget;
     } catch(e){}
     try { await ctx.sock.groupParticipantsUpdate(ctx.from, [target], 'remove'); return ctx.reply(`🚫 Kicked @${target.split('@')[0]}`); } catch(e){ return ctx.reply('Kick failed: '+e.message); }
   }
@@ -68,6 +85,7 @@ module.exports = [
     if (!await checkBotAdmin(ctx.sock, ctx.from, ctx.reply)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Tag user to promote.\nUsage: ${ctx.prefix}promote @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     try { await ctx.sock.groupParticipantsUpdate(ctx.from, [target], 'promote'); return ctx.reply(`👑 Promoted @${target.split('@')[0]} to admin`); } catch(e){ return ctx.reply('Promote failed: '+e.message+'\nBot must be admin.'); }
   }
 },
@@ -79,6 +97,7 @@ module.exports = [
     if (!await checkBotAdmin(ctx.sock, ctx.from, ctx.reply)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Tag user to demote.\nUsage: ${ctx.prefix}demote @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     try { await ctx.sock.groupParticipantsUpdate(ctx.from, [target], 'demote'); return ctx.reply(`⬇️ Demoted @${target.split('@')[0]}`); } catch(e){ return ctx.reply('Demote failed: '+e.message); }
   }
 },
@@ -89,6 +108,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}warn @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if (!ctx.db.warns) ctx.db.warns = {};
     if (!ctx.db.warns[ctx.from]) ctx.db.warns[ctx.from]={};
     ctx.db.warns[ctx.from][target] = (ctx.db.warns[ctx.from][target]||0)+1;
@@ -110,7 +130,7 @@ module.exports = [
   run: async (ctx) => {
     if (!needGroup(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
-    if (target) { let c = ctx.db.warns?.[ctx.from]?.[target]||0; return ctx.reply(`⚠️ @${target.split('@')[0]} has ${c} warnings`); }
+    if (target) { try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){} let c = ctx.db.warns?.[ctx.from]?.[target]||0; return ctx.reply(`⚠️ @${target.split('@')[0]} has ${c} warnings`); }
     let all = ctx.db.warns?.[ctx.from]||{};
     let list = Object.entries(all).filter(([k,v])=>v>0);
     if (!list.length) return ctx.reply('No warnings yet ✅');
@@ -124,6 +144,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}resetwarn @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if (ctx.db.warns?.[ctx.from]) ctx.db.warns[ctx.from][target]=0;
     save(ctx.db, ctx.F);
     return ctx.reply(`✅ Reset warnings for @${target.split('@')[0]}`);
@@ -136,6 +157,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}mute @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if (!ctx.db.muted) ctx.db.muted={};
     if(!ctx.db.muted[ctx.from]) ctx.db.muted[ctx.from]=[];
     if (!ctx.db.muted[ctx.from].includes(target)) ctx.db.muted[ctx.from].push(target);
@@ -150,6 +172,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}unmute @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if (ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target);
     save(ctx.db, ctx.F);
     return ctx.reply(`🔊 Unmuted @${target.split('@')[0]}`);
@@ -244,6 +267,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}restrict @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if(!ctx.db.muted) ctx.db.muted={};
     if(!ctx.db.muted[ctx.from]) ctx.db.muted[ctx.from]=[];
     if(!ctx.db.muted[ctx.from].includes(target)) ctx.db.muted[ctx.from].push(target);
@@ -258,6 +282,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}unrestrict @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if(ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target);
     save(ctx.db, ctx.F);
     return ctx.reply(`✅ Unrestricted @${target.split('@')[0]}`);
@@ -284,6 +309,7 @@ module.exports = [
     if (!await checkAdmin(ctx)) return;
     let target = ctx.F.getTarget(ctx.m, ctx.args);
     if (!target) return ctx.reply(`Usage: ${ctx.prefix}resetmember @user`);
+    try { let md = await ctx.sock.groupMetadata(ctx.from); target = resolveTarget(md, target); } catch(e){}
     if(ctx.db.warns?.[ctx.from]) ctx.db.warns[ctx.from][target]=0;
     if(ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target);
     save(ctx.db, ctx.F);
