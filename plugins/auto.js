@@ -17,6 +17,37 @@ function setAuto(db, key, args, reply, label, prefix, ctx) {
   return reply(statusText(db, key, label, prefix));
 }
 
+// FIXED ERROR 1+2: Bot IDs helper - check both PN and LID
+function getBotIds(sock, db, config) {
+  let ids = [];
+  let raw = sock?.user?.id || '';
+  let pn = String(raw).split(':')[0].replace(/[^0-9]/g, '');
+  if (pn) ids.push(pn);
+  // Baileys v7+ exposes LID separately
+  let lid = String(sock?.user?.lid || '').split('@')[0].replace(/[^0-9]/g, '');
+  if (lid) ids.push(lid);
+  // Fallback: owner numbers no be bot, no add dem here
+  return ids;
+}
+function isBotMentionedOrReplied(m, sock, db, config) {
+  let ids = getBotIds(sock, db, config);
+  let ctxInfo = m.message?.extendedTextMessage?.contextInfo || {};
+  let mentioned = ctxInfo.mentionedJid || [];
+  let participant = String(ctxInfo.participant || '');
+  let participantPn = String(ctxInfo.participantPn || '');
+  for (let id of ids) {
+    if (mentioned.some(j => String(j).includes(id))) return true;
+    if (participant.includes(id)) return true;
+    if (participantPn.includes(id)) return true;
+  }
+  return false;
+}
+function getTextFallback(m, F) {
+  if (F?.getText) { try { return F.getText(m); } catch(e){} }
+  let msg = m.message?.ephemeralMessage?.message || m.message || {};
+  return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
+}
+
 // ===== REAL AUTO ENGINE - index.js go call this for every message =====
 async function handleAuto(sock, m, db, F, config) {
   try {
@@ -24,6 +55,9 @@ async function handleAuto(sock, m, db, F, config) {
     let from = m.key.remoteJid;
     if (m.key.fromMe) return; // No auto-react to own messages
     if (from === 'status@broadcast') return;
+    // FIXED: index.js dey call handleAuto(sock, m, db) without F/config - fallback to db
+    let prefix = db.settings?.prefix || config?.prefix || ',';
+    let ownerNumber = config?.ownerNumber || db.owner || db.owners?.[0] || '2348102350169';
 
     // 1. autoread - REAL
     if (db.auto.autoread) await sock.readMessages([m.key]).catch(()=>{});
@@ -50,13 +84,13 @@ async function handleAuto(sock, m, db, F, config) {
     }
 
     let rawText = '';
-    try { rawText = F?.getText ? F.getText(m) : (m.message?.conversation || m.message?.extendedTextMessage?.text || ''); } catch(e){}
+    try { rawText = F?.getText ? F.getText(m) : getTextFallback(m, F); } catch(e){}
     let txt = rawText.toLowerCase().trim();
 
     // 7. autoreply - REAL hi/hello
     if (db.auto.autoreply) {
       if (['hi','hello','hey','yo','hii','hiii'].includes(txt)) {
-        await sock.sendMessage(from, { text: `Hello 👋 I am META AI MD by Simon Tech.\nType ${db.settings?.prefix || config?.prefix || ','}menu for commands` }, { quoted: m }).catch(()=>{});
+        await sock.sendMessage(from, { text: `Hello 👋 I am META AI MD by Simon Tech.\nType ${prefix}menu for commands` }, { quoted: m }).catch(()=>{});
       }
     }
 
@@ -79,7 +113,7 @@ async function handleAuto(sock, m, db, F, config) {
     }
 
     // 9. autotranslate - REAL: translate non-English to English via API
-    if (db.auto.autotranslate && rawText && rawText.length > 3 && !rawText.startsWith(db.settings?.prefix || config?.prefix || ',')) {
+    if (db.auto.autotranslate && rawText && rawText.length > 3 && !rawText.startsWith(prefix)) {
       try {
         // Only translate if e look like pidgin / french / yoruba
         if (/(bonjour|comment|merci|como|hola|gracias|e nle|bawo|kedu)/i.test(rawText)) {
@@ -93,9 +127,8 @@ async function handleAuto(sock, m, db, F, config) {
 
     // 10. autorespond - REAL AI reply when bot is mentioned / replied
     if (db.auto.autorespond) {
-      let isMention = m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.some(j => j.includes(sock.user.id.split(':')[0]));
-      let isReplyToBot = m.message?.extendedTextMessage?.contextInfo?.participant?.includes(sock.user.id.split(':')[0]);
-      if ((isMention || isReplyToBot) && rawText) {
+      let isMentionOrReply = isBotMentionedOrReplied(m, sock, db, config);
+      if (isMentionOrReply && rawText) {
         try {
           let q = rawText.replace(/@/g,'').trim();
           let aiRes = await fetch(`https://text.pollinations.ai/${encodeURIComponent(q)}`).then(r=>r.text()).then(t=>t.slice(0,1000)).catch(()=>null);
@@ -105,7 +138,7 @@ async function handleAuto(sock, m, db, F, config) {
     }
 
     // 11. autocorrect - REAL: fix common pidgin/english typos
-    if (db.auto.autocorrect && rawText && !rawText.startsWith(db.settings?.prefix || ',')) {
+    if (db.auto.autocorrect && rawText && !rawText.startsWith(prefix)) {
       let fixes = { 'watsup':'whats up', 'hwfa':'how far', 'i dey':'I am', 'u dey':'you are', 'na wa':'wow', 'abi':'right?' };
       let lower = rawText.toLowerCase();
       for (let k in fixes) {
@@ -117,7 +150,7 @@ async function handleAuto(sock, m, db, F, config) {
     }
 
     // 12. autoforward - REAL: forward to owner (handled in index.js too, but here as backup)
-    if (db.auto.autoforward && config?.ownerNumber) {
+    if (db.auto.autoforward && ownerNumber) {
       // index.js already dey handle this, skip duplicate here
     }
 
@@ -128,7 +161,7 @@ async function handleAuto(sock, m, db, F, config) {
 async function handleStatus(sock, status, db, F, config) {
   try {
     if (!db.auto) return;
-    let ownerJid = `${config?.ownerNumber || '2348102350169'}@s.whatsapp.net`;
+    let ownerJid = `${config?.ownerNumber || db.owner || db.owners?.[0] || '2348102350169'}@s.whatsapp.net`;
 
     // autoview - REAL view status
     if (db.auto.autoview) await sock.readMessages([status.key]).catch(()=>{});
@@ -146,11 +179,13 @@ async function handleStatus(sock, status, db, F, config) {
         let chunks = [];
         for await (let c of stream) chunks.push(c);
         let buf = Buffer.concat(chunks);
-        let sender = status.key.participant || status.key.remoteJid;
+        // FIXED: Use participantPn (real PN) not LID participant for sender name
+        let sender = status.key.participantPn || status.key.participant || status.key.remoteJid;
+        let senderNum = String(sender).split('@')[0];
         if (msgType === 'image') {
-          await sock.sendMessage(ownerJid, { image: buf, caption: `📥 *Status from @${sender.split('@')[0]}*\nAuto-downloaded by META AI MD` }).catch(()=>{});
+          await sock.sendMessage(ownerJid, { image: buf, caption: `📥 *Status from @${senderNum}*\nAuto-downloaded by META AI MD` }).catch(()=>{});
         } else {
-          await sock.sendMessage(ownerJid, { video: buf, caption: `📥 *Status video from @${sender.split('@')[0]}*\nAuto-downloaded` }).catch(()=>{});
+          await sock.sendMessage(ownerJid, { video: buf, caption: `📥 *Status video from @${senderNum}*\nAuto-downloaded` }).catch(()=>{});
         }
       } catch(e){ console.log('autodownload fail:', e.message); }
     }
