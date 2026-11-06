@@ -1,5 +1,5 @@
-// index.js - META AI MD - ALL CONNECTED - BY SIMON TECH
-// CONNECTED: config.js + lib/function.js + owner + group + moderator + anti + auto + protection
+// index.js - META AI MD - ALL CONNECTED + BOT STOP REPLYING FIX - BY SIMON TECH
+// FIXED: LID owner + ephemeral text + forceConfig + senderPn + isAdmin LID + debug logs
 // ONE FLOW: Private -> Ban/Mute -> Protection -> Auto -> Protection Commands -> Plugins -> Commands
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
@@ -16,23 +16,35 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 const PORT = config.port || 10000;
 let sock = null;
-let db = F.loadDB();
+let db = F.loadDB ? F.loadDB(config) : F.loadDB();
 let isStarting = false;
 let reconnectTimer = null;
 
-// ===== CONNECTED HELPERS - Use F.getMode / F.getPrefix from lib/function.js (single source) =====
+// ===== CONNECTED HELPERS - Use F.getMode / F.getPrefix (respects forceConfig) =====
 function getMode(){ return F.getMode ? F.getMode(db, config) : (db.settings?.mode || config.mode || 'private'); }
 function getPrefix(){ return F.getPrefix ? F.getPrefix(db, config) : (db.settings?.prefix || config.prefix || ','); }
 
-function isOwnerCheck(sender, db){
-  let num = String(sender || '').replace(/[^0-9]/g, '');
+// ===== OWNER CHECK - LID + Pn + ownerLids =====
+function isOwnerCheck(sender, senderPn, db){
+  // New helper from lib/function.js - handles LID
+  if (F.isOwnerMessage) {
+    // Build fake m object for helper
+    let fakeM = { key: { participant: sender, participantPn: senderPn, remoteJid: sender, remoteJidAlt: senderPn } };
+    try { if (F.isOwnerMessage(fakeM, db, config)) return true; } catch(e){}
+  }
+  let nums = [];
+  if (sender) nums.push(String(sender).split('@')[0].replace(/[^0-9]/g,''));
+  if (senderPn) nums.push(String(senderPn).split('@')[0].replace(/[^0-9]/g,''));
   let owners = [];
   if(config.ownerNumber) owners.push(String(config.ownerNumber).replace(/[^0-9]/g, ''));
   if(db.owner) owners.push(String(db.owner).replace(/[^0-9]/g, ''));
   if(Array.isArray(db.owners)) db.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
   if(Array.isArray(config.owners)) config.owners.forEach(o => owners.push(String(o).replace(/[^0-9]/g, '')));
-  try{ if(F.isOwner && F.isOwner(sender, db)) return true; }catch(e){}
-  return owners.includes(num);
+  // LID list
+  if (sender && Array.isArray(config.ownerLids) && config.ownerLids.includes(sender)) return true;
+  if (senderPn && Array.isArray(config.ownerLids) && config.ownerLids.includes(senderPn)) return true;
+  try{ if(F.isOwner && (F.isOwner(sender, db, config) || F.isOwner(senderPn, db, config))) return true; }catch(e){}
+  return nums.some(n => owners.includes(n));
 }
 
 // ===== FANCY BOLD FONT =====
@@ -43,7 +55,7 @@ function fancy(text){
 F.fancy = fancy;
 F.bold = fancy;
 
-// ===== LOAD ENGINES - protection + auto + anti (single instances) =====
+// ===== LOAD ENGINES =====
 let protectionMod = null, autoMod = null, antiMod = null;
 function loadEngines(){
   try{ protectionMod = require('./plugins/protection.js'); }catch(e){ try{ protectionMod = require('./commands/protection.js'); }catch(_){ protectionMod = null; } }
@@ -52,7 +64,7 @@ function loadEngines(){
 }
 loadEngines();
 
-// ===== LOAD COMMANDS - CONNECTED: commands/ + plugins/ BOTH, moderator wins for duplicates =====
+// ===== LOAD COMMANDS - commands/ + plugins/ BOTH, moderator wins =====
 let commands = new Map();
 let functionPlugins = [];
 
@@ -60,26 +72,32 @@ function loadPlugins(){
   commands.clear();
   functionPlugins = [];
   loadEngines();
-
-  // Load order matters: commands/ first, then plugins/ - plugins/ go overwrite duplicates
-  // But for moderator vs group duplicates (kick/promote/demote/mute), moderator must win.
-  // So we load group first, moderator last.
   const loadDir = (dirName, priority) => {
     let dir = path.join(__dirname, dirName);
     if(!fs.existsSync(dir)) return;
     let files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
-    // Sort: group.js first, moderator.js last, so moderator overwrites group duplicates
     files.sort((a,b)=>{
       if(a.includes('moderator')) return 1;
       if(b.includes('moderator')) return -1;
-      if(a.includes('protection')) return 1; // protection is function, not array - skip as command
+      if(a.includes('protection')) return 1;
       if(b.includes('protection')) return -1;
       return a.localeCompare(b);
     });
     console.log(`📁 Found files in ${dirName}/:`, files);
     for(let file of files){
-      // Skip protection.js as array command - e na engine, not command list
       if(file === 'protection.js') continue;
+      // Skip auto.js / anti.js as array commands - dem na engines, dem get handleAuto/handleAnti
+      if(file === 'auto.js' || file === 'anti.js') {
+        // Only load as array if e actually export array - check quickly
+        try{
+          let fullTmp = path.join(dir, file);
+          delete require.cache[require.resolve(fullTmp)];
+          let tmp = require(fullTmp);
+          if (!Array.isArray(tmp) && !tmp?.name && !tmp?.plugins) continue;
+          // If e be array, fall through to normal load below
+          if (!Array.isArray(tmp) && !tmp?.plugins) continue;
+        }catch(e){ continue; }
+      }
       try{
         let full = path.join(dir, file);
         delete require.cache[require.resolve(full)];
@@ -89,7 +107,7 @@ function loadPlugins(){
           console.log(`✅ Loaded FUNCTION ${dirName}/${file}`);
           continue;
         }
-        if(plugin && typeof plugin.handler === 'function'){
+        if(plugin && typeof plugin.handler === 'function' && !Array.isArray(plugin) && !plugin.name){
           functionPlugins.push({ file: `${dirName}/${file}`, fn: plugin.handler });
           console.log(`✅ Loaded HANDLER ${dirName}/${file}`);
           continue;
@@ -99,18 +117,14 @@ function loadPlugins(){
         else if(plugin && Array.isArray(plugin.plugins)) list = plugin.plugins;
         else if(plugin && plugin.name) list = [plugin];
         else {
-          console.log(`⚠️ Skipped ${dirName}/${file} - unknown export`);
+          console.log(`⚠️ Skipped ${dirName}/${file} - engine file, not commands`);
           continue;
         }
         for(let p of list){
           if(!p || !p.name || typeof p.run !== 'function') continue;
-          // If duplicate exists and current file is NOT moderator, keep existing (moderator wins later)
-          // If current is moderator, always overwrite
           let isModerator = file.includes('moderator');
           let exists = commands.has(p.name.toLowerCase());
           if(exists && !isModerator && priority === 'plugins'){
-            // plugins/ group.js should NOT overwrite commands/ moderator.js
-            // Check if existing came from moderator - we track via _source
             if(commands.get(p.name.toLowerCase())._source?.includes('moderator')) continue;
           }
           p._source = `${dirName}/${file}`;
@@ -121,7 +135,6 @@ function loadPlugins(){
       }catch(e){ console.log('❌ Plugin failed:', dirName, file, e.message); }
     }
   };
-
   loadDir('commands', 'commands');
   loadDir('plugins', 'plugins');
   console.log(`Total commands: ${commands.size} | Function plugins: ${functionPlugins.length}`);
@@ -130,7 +143,7 @@ function loadPlugins(){
 loadPlugins();
 
 // ===== EXPRESS + KEEPALIVE =====
-app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(), prefix: getPrefix() }));
+app.get('/status', (req,res)=> res.json({ connected: !!sock?.user, user: sock?.user?.id || '', totalCmds: commands.size, functionPlugins: functionPlugins.length, mode: getMode(), prefix: getPrefix(), owner: config.ownerNumber }));
 app.get('/ping', (req,res)=> res.send('pong'));
 app.get('/pair', async (req,res)=>{
   try{
@@ -208,12 +221,11 @@ async function start(){
       if(connection === 'open'){
         isStarting = false;
         console.log('META AI MD CONNECTED ✅');
-        console.log(`Mode: ${getMode()} | Prefix: ${getPrefix()} | Cmds: ${commands.size}`);
+        console.log(`Mode: ${getMode()} | Prefix: ${getPrefix()} | Cmds: ${commands.size} | Owner: ${config.ownerNumber}`);
         try{ if(autoMod?.startAutoBio) autoMod.startAutoBio(sock, db, config); }catch(e){}
       }
     });
 
-    // ===== STATUS - BLOCKED IN PRIVATE + CONNECTED AUTO =====
     sock.ev.on('messages.upsert', async ({ messages }) => {
       try {
         if (messages[0]?.key?.remoteJid === 'status@broadcast') {
@@ -223,7 +235,6 @@ async function start(){
       } catch(e){}
     });
 
-    // ===== ANTIDELETE REAL - messages.update =====
     sock.ev.on('messages.update', async (updates) => {
       try {
         if (protectionMod?.handleAntiDelete) await protectionMod.handleAntiDelete(sock, updates, db, F);
@@ -231,23 +242,14 @@ async function start(){
       } catch(e){}
     });
 
-    // ===== GROUP JOIN/LEAVE - BLOCKED IN PRIVATE + CONNECTED PROTECTION SETTINGS =====
     sock.ev.on('group-participants.update', async (u) => {
       try {
         if(getMode() === 'private') return;
         let from = u.id;
         let g = db.group?.[from];
         if (!g) return;
-        // Anti-fake on join - if antifake ON and number no be 234, kick
         let protectionSettings = g.protection || {};
         for (let p of u.participants) {
-          if (u.action === 'add' && (protectionSettings.antifake || db.anti?.antifake)) {
-            let num = p.split('@')[0];
-            if (!num.startsWith('234') && !num.startsWith('1')) {
-              // Don't auto-kick, just log - to avoid false kick
-              console.log(`⚠️ Fake join detected: ${num} in ${from}`);
-            }
-          }
           if (u.action === 'add' && (g.welcome || db.auto?.autowelcome)) {
             let activeP = getPrefix();
             let msg = (g.welcomeMsg || `👋 Welcome @user to *{group}*!\n\nType ${activeP}menu`).replace(/@user/g, `@${p.split('@')[0]}`).replace(/\{group\}/g, u.subject || 'group');
@@ -269,23 +271,30 @@ async function start(){
       } catch(e){ console.log('Group update err:', e.message); }
     });
 
-    // ===== MAIN MESSAGE HANDLER - CONNECTED ALL =====
+    // ===== MAIN MESSAGE HANDLER - FIXED LID + EPHEMERAL =====
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for(let m of messages){
         try{
           if(!m?.message) continue;
           if (m.key.remoteJid === 'status@broadcast') continue;
           let from = m.key.remoteJid;
-          let sender = m.key.participant || m.key.remoteJid;
-          let senderNum = sender.split('@')[0];
+
+          // ===== FIX: LID + Pn - Use helpers from lib/function.js =====
+          let sender = F.getSenderJid ? F.getSenderJid(m) : (m.key.participant || m.key.remoteJid);
+          let senderPn = F.getSenderPn ? F.getSenderPn(m) : (m.key.participantPn || m.key.remoteJidAlt || sender);
+          let senderNum = F.getSenderNumber ? F.getSenderNumber(m) : String(senderPn || sender).split('@')[0].replace(/[^0-9]/g,'');
           let pushname = m.pushName || 'User';
-          let body = F.getText(m);
-          if(!body) continue;
-          console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum}: ${body.slice(0,80)}`);
+          let body = F.getText(m); // Now unwraps ephemeralMessage
+          if(!body) {
+            // Debug: log why body empty, so you fit see for logs
+            console.log(`📩 EMPTY BODY - keys: ${Object.keys(m.message || {})} | from: ${senderNum}`);
+            continue;
+          }
+          console.log(`📩 [${m.key.fromMe ? 'FROM-ME' : 'FROM-OTHER'}] ${senderNum} (raw: ${sender} | pn: ${senderPn}): ${body.slice(0,80)}`);
           let isGroup = F.isGroup(from);
 
-          // ===== 1. OWNER + SELF =====
-          let isOwner = isOwnerCheck(sender, db);
+          // ===== 1. OWNER + SELF - LID FIX =====
+          let isOwner = isOwnerCheck(sender, senderPn, db);
           let isSelfCommand = false;
           let activePrefix = getPrefix();
           if(m.key.fromMe){
@@ -294,49 +303,48 @@ async function start(){
             isOwner = true;
             console.log('✅ Self-command detected, treating as owner');
           }
+          // DEBUG: Show owner check result for Render logs
+          console.log(`🔍 OWNER CHECK: senderNum=${senderNum} isOwner=${isOwner} mode=${getMode()} prefix=${activePrefix}`);
 
-          // ===== 2. PRIVATE MODE - from F.getMode (single source) =====
+          // ===== 2. PRIVATE MODE =====
           let mode = getMode();
           if(mode === 'private' && !isOwner){
             console.log(`🔒 PRIVATE MODE - Ignored ${senderNum}: ${body.slice(0,30)}`);
             continue;
           }
 
-          // ===== 3. BAN + MUTE =====
-          if (db.banned?.includes(senderNum) && !isOwner) continue;
-          if (isGroup && db.muted?.[from]?.includes(sender) && !isOwner) {
+          // ===== 3. BAN + MUTE - Check both sender + senderPn =====
+          if ((db.banned?.includes(senderNum) || db.banned?.includes(String(sender).split('@')[0])) && !isOwner) continue;
+          if (isGroup && (db.muted?.[from]?.includes(sender) || db.muted?.[from]?.includes(senderPn)) && !isOwner) {
             try { await sock.sendMessage(from, { delete: m.key }); } catch(e){}
             continue;
           }
 
-          // ===== 4. isAdmin ONCE - pass to all commands =====
+          // ===== 4. isAdmin ONCE - LID aware =====
           let isAdmin = false;
           if (isGroup) {
             try {
               let md = await sock.groupMetadata(from).catch(()=>null);
-              let me = md?.participants.find(p=>p.id===sender);
+              let me = md?.participants.find(p=> p.id===sender || p.id===senderPn || p.phoneNumber===sender || p.phoneNumber===senderPn);
               isAdmin = !!(me && me.admin);
             } catch(e){}
           }
+          if (isOwner) isAdmin = true; // Owner na admin everywhere
 
-          // ===== 5. PROTECTION + AUTO (only for others, not self) =====
+          // ===== 5. PROTECTION + AUTO =====
           if(!isSelfCommand){
-            // 5a. PROTECTION - MAIN anti engine, ONE warn system (no triple warn)
             try {
               if (protectionMod?.handleProtection) {
                 let blocked = await protectionMod.handleProtection(sock, m, db, F, config);
                 if (blocked) { F.saveDB(db); continue; }
               } else if (antiMod?.handleAnti) {
-                // Fallback if protection.js no dey
                 let blocked = await antiMod.handleAnti(sock, m, db, F);
                 if (blocked) { F.saveDB(db); continue; }
               }
             } catch(e){ console.log('Protection err:', e.message); }
 
-            // 5b. AUTO - autoread, autoreact, autosticker, etc
             try { if (autoMod?.handleAuto) await autoMod.handleAuto(sock, m, db, F, config); } catch(e){ console.log('Auto err:', e.message); }
 
-            // 5c. AUTOFORWARD
             if (db.auto?.autoforward && !isOwner) {
               try { await sock.sendMessage(`${config.ownerNumber}@s.whatsapp.net`, { text: `📩 Forward from @${senderNum} in ${isGroup ? from : 'DM'}:\n${body}`, mentions: [sender] }); } catch(e){}
             }
@@ -344,7 +352,11 @@ async function start(){
 
           // ===== 6. PREFIX + COMMAND PARSE =====
           let usedPrefix = activePrefix;
-          if(!body.startsWith(usedPrefix)) continue;
+          if(!body.startsWith(usedPrefix)) {
+            // Debug: body no start with prefix - log am once
+            console.log(`⏭️ No prefix - body starts with "${body.slice(0,1)}" expected "${usedPrefix}"`);
+            continue;
+          }
           let args = body.slice(usedPrefix.length).trim().split(/ +/);
           let cmdName = (args.shift()||'').toLowerCase();
           let text = args.join(' ');
@@ -362,10 +374,10 @@ async function start(){
             return await reply(`✅ ${fancy('Reloaded!')} Total: ${commands.size} commands`);
           }
 
-          // ===== 7. CTX - CONNECTED: isAdmin + isOwner + prefix + db + F =====
-          let ctx = { sock, m, from, sender, senderNum, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isGroup, db, config, F, reply, fancy, fancyReply };
+          // ===== 7. CTX =====
+          let ctx = { sock, m, from, sender, senderPn, senderNum, pushname, args, text, q: text, cmd: cmdName, cmdName, prefix: usedPrefix, isOwner, isAdmin, isGroup, db, config, F, reply, fancy, fancyReply };
 
-          // ===== 8. PROTECTION COMMANDS - ,antilink on, ,protection, etc =====
+          // ===== 8. PROTECTION COMMANDS =====
           try {
             if (protectionMod?.handleCommands) {
               let handledProt = await protectionMod.handleCommands(sock, m, ctx);
@@ -388,14 +400,14 @@ async function start(){
           }
           if(handled) continue;
 
-          // ===== 10. ARRAY COMMANDS - owner/group/moderator/auto/anti =====
+                  // ===== 10. ARRAY COMMANDS =====
           let plugin = commands.get(cmdName);
           if(!plugin) return await reply(`❌ ${fancy('Unknown command:')} ${usedPrefix}${cmdName}\n${fancy('Type')} ${usedPrefix}menu\n\n${config.footer}`);
           if(plugin.ownerOnly && !isOwner) return await reply(config.messages.ownerOnly);
           if(plugin.groupOnly && !isGroup) return await reply(config.messages.groupOnly);
           try{
             await Promise.race([
-              plugin.run({ sock, m, from, sender, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isAdmin, isGroup, db, config, F, reply, fancy, fancyReply }),
+              plugin.run({ sock, m, from, sender, senderPn, senderNum, pushname, args, text, cmd: cmdName, prefix: usedPrefix, isOwner, isAdmin, isGroup, db, config, F, reply, fancy, fancyReply }),
               new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
             ]);
             F.saveDB(db);
