@@ -1,268 +1,331 @@
-// plugins/auto.js - REAL AUTO HANDLERS by Simon Tech
-// Every toggle has a real action + saves to DB
+// plugins/auto.js
+// META AI V2 - Auto Plugin
+// Developer: Simon Tech Inc
 
-function statusText(db, key, label, prefix) {
-  let on = db.auto && db.auto[key];
-  return `*${label}*\nStatus: ${on ? '✅ ON' : '❌ OFF'}\n\nUsage: ${prefix}${key} on / off\n\n©️ Created by Simon Tech Inc`;
-}
-
-function setAuto(db, key, args, reply, label, prefix, ctx) {
-  if (!db.auto) db.auto = {};
-  let v = (args[0] || '').toLowerCase();
-  if (v === 'on' || v === 'off') {
-    db.auto[key] = v === 'on';
-    if (ctx?.F) ctx.F.saveDB(db);
-    return reply(`✅ *${label}* is now *${v.toUpperCase()}*`);
-  }
-  return reply(statusText(db, key, label, prefix));
-}
-
-// Bot IDs helper - check both PN and LID
-function getBotIds(sock, db, config) {
-  let ids = [];
-  let raw = sock?.user?.id || '';
-  let pn = String(raw).split(':')[0].replace(/[^0-9]/g, '');
-  if (pn) ids.push(pn);
-  let lid = String(sock?.user?.lid || '').split('@')[0].replace(/[^0-9]/g, '');
-  if (lid) ids.push(lid);
-  return ids;
-}
-function isBotMentionedOrReplied(m, sock, db, config) {
-  let ids = getBotIds(sock, db, config);
-  let ctxInfo = m.message?.extendedTextMessage?.contextInfo || {};
-  let mentioned = ctxInfo.mentionedJid || [];
-  let participant = String(ctxInfo.participant || '');
-  let participantPn = String(ctxInfo.participantPn || '');
-  for (let id of ids) {
-    if (mentioned.some(j => String(j).includes(id))) return true;
-    if (participant.includes(id)) return true;
-    if (participantPn.includes(id)) return true;
-  }
-  return false;
-}
-function getTextFallback(m, F) {
-  if (F?.getText) { try { return F.getText(m); } catch(e){} }
-  let msg = m.message?.ephemeralMessage?.message || m.message || {};
-  return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
-}
-
-// ===== REAL AUTO ENGINE - index.js calls this for every message =====
-async function handleAuto(sock, m, db, F, config) {
-  try {
-    if (!db.auto) return;
-    // Fast exit - if no auto is ON, skip everything
-    if (!Object.values(db.auto).some(v => v === true)) return;
-    let from = m.key.remoteJid;
-    if (m.key.fromMe) return; // No auto-react to own messages
-    if (from === 'status@broadcast') return;
-    let prefix = db.settings?.prefix || config?.prefix || '.';
-    let ownerNumber = config?.ownerNumber || db.owner || db.owners?.[0] || '2348102350169';
-
-    // 1. autoread - Mark as read
-    if (db.auto.autoread) await sock.readMessages([m.key]).catch(()=>{});
-
-    // 2. autotyping - Show typing
-    if (db.auto.autotyping) {
-      await sock.sendPresenceUpdate('composing', from).catch(()=>{});
-    }
-    // 3. autoonline
-    if (db.auto.autoonline) await sock.sendPresenceUpdate('available', from).catch(()=>{});
-    // 4. autorecording
-    if (db.auto.autorecording) {
-      await sock.sendPresenceUpdate('recording', from).catch(()=>{});
-    }
-    // 5. autoreact - React ❤️
-    if (db.auto.autoreact) {
-      await sock.sendMessage(from, { react: { text: '❤️', key: m.key } }).catch(()=>{});
-    }
-    // 6. autolikemsg - React 👍 (if both on, only one runs to avoid spam)
-    if (db.auto.autolikemsg && !db.auto.autoreact) {
-      await sock.sendMessage(from, { react: { text: '👍', key: m.key } }).catch(()=>{});
-    }
-
-    let rawText = '';
-    try { rawText = F?.getText ? F.getText(m) : getTextFallback(m, F); } catch(e){}
-    let txt = rawText.toLowerCase().trim();
-
-    // 7. autoreply - Reply to Hi / Hello
-    if (db.auto.autoreply) {
-      if (['hi','hello','hey','yo','hii','hiii'].includes(txt)) {
-        await sock.sendMessage(from, { text: `Hello 👋 I am META AI MD by Simon Tech.\nType ${prefix}menu for commands` }, { quoted: m }).catch(()=>{});
-      }
-    }
-
-    // 8. autosticker - If image, download + send back as sticker
-    if (db.auto.autosticker && m.message?.imageMessage) {
-      try {
-        let buf = null;
-        if (F?.downloadMedia) buf = await F.downloadMedia(m).catch(()=>null);
-        if (!buf) {
-          const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-          let stream = await downloadContentFromMessage(m.message.imageMessage, 'image');
-          let chunks = [];
-          for await (let c of stream) chunks.push(c);
-          buf = Buffer.concat(chunks);
-        }
-        if (buf) {
-          await sock.sendMessage(from, { sticker: buf, mimetype: 'image/webp' }, { quoted: m }).catch(()=>{});
-        }
-      } catch(e){ console.log('autosticker fail:', e.message); }
-    }
-
-    // 9. autotranslate - Translate non-English to English via API
-    if (db.auto.autotranslate && rawText && rawText.length > 3 && !rawText.startsWith(prefix)) {
-      try {
-        if (/(bonjour|comment|merci|como|hola|gracias|obrigado|como esta|wie geht|guten tag)/i.test(rawText)) {
-          let res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(rawText)}&langpair=auto|en`).then(r=>r.json()).catch(()=>null);
-          if (res?.responseData?.translatedText && res.responseData.translatedText.toLowerCase() !== rawText.toLowerCase()) {
-            await sock.sendMessage(from, { text: `🌐 *Auto Translate:*\n${res.responseData.translatedText}` }, { quoted: m }).catch(()=>{});
-          }
-        }
-      } catch(e){}
-    }
-
-    // 10. autorespond - AI reply when bot is mentioned / replied to
-    if (db.auto.autorespond) {
-      let isMentionOrReply = isBotMentionedOrReplied(m, sock, db, config);
-      if (isMentionOrReply && rawText) {
-        try {
-          let q = rawText.replace(/@/g,'').trim();
-          let aiRes = await fetch(`https://text.pollinations.ai/${encodeURIComponent(q)}`).then(r=>r.text()).then(t=>t.slice(0,1000)).catch(()=>null);
-          if (aiRes) await sock.sendMessage(from, { text: `🤖 ${aiRes}` }, { quoted: m }).catch(()=>{});
-        } catch(e){}
-      }
-    }
-
-    // 11. autoforward is handled in index.js only - no duplicate here
-    // 12. autoblock is handled via call event, not here
-  } catch(e) { console.log('Auto error:', e.message); }
-}
-
-async function handleStatus(sock, status, db, F, config) {
-  try {
-    if (!db.auto) return;
-    let ownerJid = `${config?.ownerNumber || db.owner || db.owners?.[0] || '2348102350169'}@s.whatsapp.net`;
-
-    // autoview - View status
-    if (db.auto.autoview) await sock.readMessages([status.key]).catch(()=>{});
-    // autolikestatus - React ❤️ to status
-    if (db.auto.autolikestatus) {
-      await sock.sendMessage(status.key.remoteJid, { react: { text: '❤️', key: status.key } }).catch(()=>{});
-    }
-    // autodownload - Download status image/video + forward to owner
-    if (db.auto.autodownload && (status.message?.imageMessage || status.message?.videoMessage)) {
-      try {
-        const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-        let msgType = status.message.imageMessage ? 'image' : 'video';
-        let msgObj = status.message.imageMessage || status.message.videoMessage;
-        let stream = await downloadContentFromMessage(msgObj, msgType);
-        let chunks = [];
-        for await (let c of stream) chunks.push(c);
-        let buf = Buffer.concat(chunks);
-        // Use participantPn (real PN) not LID participant for sender
-        let senderPn = status.key.participantPn || status.key.remoteJidAlt || status.key.participant || status.key.remoteJid;
-        let senderNum = String(senderPn).split('@')[0];
-        if (msgType === 'image') {
-          await sock.sendMessage(ownerJid, { image: buf, caption: `📥 *Status from @${senderNum}*\nAuto-downloaded by META AI MD`, mentions: [senderPn] }).catch(()=>{});
-        } else {
-          await sock.sendMessage(ownerJid, { video: buf, caption: `📥 *Status video from @${senderNum}*\nAuto-downloaded`, mentions: [senderPn] }).catch(()=>{});
-        }
-      } catch(e){ console.log('autodownload fail:', e.message); }
-    }
-  } catch(e) {}
-}
-
-let bioInterval = null;
-function startAutoBio(sock, db, config) {
-  if (bioInterval) clearInterval(bioInterval);
-  bioInterval = setInterval(async () => {
-    if (db.auto?.autobio) {
-      try { await sock.updateProfileStatus(`🤖 META AI MD | ${new Date().toLocaleTimeString('en-US',{timeZone: config?.timezone || 'Africa/Lagos'})} | By Simon Tech`); } catch(e){}
-    }
-    if (db.auto?.autoonline) { try { await sock.sendPresenceUpdate('available'); } catch(e){} }
-    // autogreet - Good morning 7am, Good night 10pm
-    if (db.auto?.autogreet) {
-      let tz = config?.timezone || 'Africa/Lagos';
-      let hour = new Date().toLocaleString('en-US',{ timeZone: tz, hour:'numeric', hour12:false });
-      let today = new Date().toLocaleDateString('en-US',{ timeZone: tz });
-      if (hour == 7 && db.auto._lastGreet !== today+'-morning') {
-        db.auto._lastGreet = today+'-morning';
-        try { await sock.sendMessage('status@broadcast', { text: '🌅 Good morning! META AI MD is online ✅ Have a great day! - Simon Tech' }); } catch(e){}
-      }
-      if (hour == 22 && db.auto._lastGreet !== today+'-night') {
-        db.auto._lastGreet = today+'-night';
-        try { await sock.sendMessage('status@broadcast', { text: '🌙 Good night! META AI MD is now offline. See you tomorrow - Simon Tech' }); } catch(e){}
-      }
-    }
-    // autoclean - Clear old warns every hour
-    if (db.auto?.autoclean) {
-      db.warns = {};
-    }
-  }, 60000);
-}
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 const autoList = [
-  { key: 'autoread', label: 'Auto Read - Mark all as read' },
-  { key: 'autotyping', label: 'Auto Typing - Show typing' },
-  { key: 'autoonline', label: 'Auto Online - Always online' },
-  { key: 'autorecording', label: 'Auto Recording - Show recording' },
-  { key: 'autoreact', label: 'Auto React - ❤️ to every message' },
-  { key: 'autoreply', label: 'Auto Reply - Auto reply to Hi / Hello' },
-  { key: 'autosticker', label: 'Auto Sticker - Auto convert image to sticker' },
-  { key: 'autoview', label: 'Auto View Status - Auto view all status' },
-  { key: 'autobio', label: 'Auto Bio - Update bio every minute' },
-  { key: 'autolikestatus', label: 'Auto Like Status - Auto ❤️ all status' },
-  { key: 'autodownload', label: 'Auto Download Status - Forward status media to owner' },
-  { key: 'autowelcome', label: 'Auto Welcome - Welcome new members' },
-  { key: 'autogoodbye', label: 'Auto Goodbye - Goodbye to left members' },
-  { key: 'autolikemsg', label: 'Auto Like Message - 👍 to every message' },
-  { key: 'autotranslate', label: 'Auto Translate - Translate to English' },
-  { key: 'autotag', label: 'Auto Tag - Auto tag all on new message (use carefully)' },
-  { key: 'autoblock', label: 'Auto Block - Block spam calls' },
-  { key: 'autofollow', label: 'Auto Follow - Auto follow back (status)' },
-  { key: 'autogreet', label: 'Auto Greet - Good morning / night auto status' },
-  { key: 'autopresence', label: 'Auto Presence - Keep presence online' },
-  { key: 'autostatus', label: 'Auto Status - Post auto status' },
-  { key: 'autorespond', label: 'Auto Respond - AI auto respond when tagged' },
-  { key: 'autoclean', label: 'Auto Clean - Auto clear warns hourly' },
-  { key: 'autoforward', label: 'Auto Forward - Forward all messages to owner' },
+    ['autoread', 'Auto Read'],
+    ['autotyping', 'Auto Typing'],
+    ['autoonline', 'Auto Online'],
+    ['autorecording', 'Auto Recording'],
+    ['autoreact', 'Auto React'],
+    ['autolikemsg', 'Auto Like Message'],
+    ['autoreply', 'Auto Reply'],
+    ['autosticker', 'Auto Sticker'],
+    ['autoview', 'Auto View Status'],
+    ['autolikestatus', 'Auto Like Status'],
+    ['autobio', 'Auto Bio'],
+    ['autogreet', 'Auto Greet']
 ];
 
-let cmds = autoList.map(item => ({
-  name: item.key,
-  category: 'auto',
-  ownerOnly: true,
-  run: async (ctx) => {
-    let r = await setAuto(ctx.db, item.key, ctx.args, ctx.reply, item.label, ctx.prefix, ctx);
-    // Instant action when turning ON
-    if (ctx.args[0]?.toLowerCase() === 'on') {
-      try {
-        if (item.key === 'autoread') await ctx.sock.readMessages([ctx.m.key]).catch(()=>{});
-        if (item.key === 'autotyping') await ctx.sock.sendPresenceUpdate('composing', ctx.from).catch(()=>{});
-        if (item.key === 'autoonline' || item.key === 'autopresence') await ctx.sock.sendPresenceUpdate('available').catch(()=>{});
-        if (item.key === 'autorecording') await ctx.sock.sendPresenceUpdate('recording', ctx.from).catch(()=>{});
-        if (item.key === 'autoreact') await ctx.sock.sendMessage(ctx.from,{react:{text:'❤️',key:ctx.m.key}}).catch(()=>{});
-        if (item.key === 'autolikemsg') await ctx.sock.sendMessage(ctx.from,{react:{text:'👍',key:ctx.m.key}}).catch(()=>{});
-        if (item.key === 'autobio') await ctx.sock.updateProfileStatus('🤖 META AI MD | Online 24/7 | By Simon Tech').catch(()=>{});
-        if (item.key === 'autostatus') await ctx.sock.sendMessage('status@broadcast',{text:'🤖 META AI MD Online ✅ By Simon Tech'}).catch(()=>{});
-        if (item.key === 'autoclean') { ctx.db.warns={}; if(ctx.F) ctx.F.saveDB(ctx.db); }
-      } catch(e){}
+function saveDB(ctx) {
+    if (typeof ctx.F?.saveDB === 'function') {
+        ctx.F.saveDB(ctx.db);
     }
-    return r;
-  }
+}
+
+function getText(m, F) {
+    if (typeof F?.getText === 'function') {
+        try {
+            return F.getText(m) || '';
+        } catch {}
+    }
+
+    let msg = m.message?.ephemeralMessage?.message || m.message || {};
+
+    return (
+        msg.conversation ||
+        msg.extendedTextMessage?.text ||
+        msg.imageMessage?.caption ||
+        msg.videoMessage?.caption ||
+        ''
+    );
+}
+
+function getBotIds(sock) {
+    const ids = [];
+
+    const raw = String(sock.user?.id || '');
+    const number = raw.split(':')[0].split('@')[0].replace(/\D/g, '');
+
+    if (number) ids.push(number);
+
+    const lid = String(sock.user?.lid || '')
+        .split('@')[0]
+        .replace(/\D/g, '');
+
+    if (lid) ids.push(lid);
+
+    return ids;
+}
+
+function isBotMentioned(m, sock) {
+    const context =
+        m.message?.extendedTextMessage?.contextInfo ||
+        m.message?.imageMessage?.contextInfo ||
+        m.message?.videoMessage?.contextInfo ||
+        {};
+
+    const ids = getBotIds(sock);
+
+    return (context.mentionedJid || []).some(jid =>
+        ids.some(id => String(jid).includes(id))
+    );
+}
+
+function setAuto(db, key, value) {
+    if (!db.auto) db.auto = {};
+    db.auto[key] = value;
+}
+
+function statusText(db, key, label, prefix) {
+    const enabled = db.auto?.[key] === true;
+
+    return `*${label}*
+
+Status: ${enabled ? '✅ ON' : '❌ OFF'}
+
+Usage:
+${prefix}${key} on
+${prefix}${key} off
+
+©️ Simon Tech Inc`;
+}
+
+// ======================================
+// AUTO MESSAGE HANDLER
+// ======================================
+
+async function handleAuto(sock, m, db, F, config) {
+    try {
+        if (!m?.key || m.key.fromMe) return;
+        if (m.key.remoteJid === 'status@broadcast') return;
+
+        const auto = db.auto || {};
+        if (!Object.values(auto).some(v => v === true)) return;
+
+        const from = m.key.remoteJid;
+        const prefix = db.settings?.prefix || config?.PREFIX || '.';
+
+        if (auto.autoread) {
+            await sock.readMessages([m.key]).catch(() => {});
+        }
+
+        if (auto.autoonline) {
+            await sock.sendPresenceUpdate('available').catch(() => {});
+        }
+
+        if (auto.autotyping) {
+            await sock.sendPresenceUpdate('composing', from).catch(() => {});
+        }
+
+        if (auto.autorecording) {
+            await sock.sendPresenceUpdate('recording', from).catch(() => {});
+        }
+
+        if (auto.autoreact) {
+            await sock.sendMessage(from, {
+                react: { text: '❤️', key: m.key }
+            }).catch(() => {});
+        } else if (auto.autolikemsg) {
+            await sock.sendMessage(from, {
+                react: { text: '👍', key: m.key }
+            }).catch(() => {});
+        }
+
+        const text = getText(m, F).trim();
+        const lower = text.toLowerCase();
+
+        if (
+            auto.autoreply &&
+            ['hi', 'hello', 'hey', 'hii', 'hiii'].includes(lower)
+        ) {
+            await sock.sendMessage(
+                from,
+                {
+                    text: `Hello 👋\nI am META AI V2.\nType ${prefix}menu to see my commands.`
+                },
+                { quoted: m }
+            );
+        }
+
+        if (auto.autorespond && text && isBotMentioned(m, sock)) {
+            // AI response will be connected to your chosen AI provider later.
+            // No fake AI response is sent here.
+        }
+
+        if (auto.autosticker && m.message?.imageMessage) {
+            const stream = await downloadContentFromMessage(
+                m.message.imageMessage,
+                'image'
+            );
+
+            const chunks = [];
+
+            for await (const chunk of stream) {
+                chunks.push(chunk);
+            }
+
+            const buffer = Buffer.concat(chunks);
+
+            if (buffer.length) {
+                await sock.sendMessage(
+                    from,
+                    { sticker: buffer },
+                    { quoted: m }
+                );
+            }
+        }
+
+    } catch (error) {
+        console.error('[AUTO MESSAGE]', error.message);
+    }
+}
+
+// ======================================
+// STATUS HANDLER
+// ======================================
+
+async function handleStatus(sock, status, db) {
+    try {
+        if (!status?.key || !db.auto) return;
+
+        if (db.auto.autoview) {
+            await sock.readMessages([status.key]).catch(() => {});
+        }
+
+        if (db.auto.autolikestatus) {
+            await sock.sendMessage(status.key.remoteJid, {
+                react: {
+                    text: '❤️',
+                    key: status.key
+                }
+            }).catch(() => {});
+        }
+
+    } catch (error) {
+        console.error('[AUTO STATUS]', error.message);
+    }
+}
+
+// ======================================
+// GROUP PARTICIPANT HANDLER
+// ======================================
+
+async function handleParticipants(sock, update, db) {
+    try {
+        if (!db.auto) return;
+
+        const { id, participants, action } = update;
+
+        if (!id || !participants?.length) return;
+
+        for (const user of participants) {
+            if (action === 'add' && db.auto.autowelcome) {
+                await sock.sendMessage(id, {
+                    text: `👋 Welcome @${user.split('@')[0]}!\nWelcome to the group.`,
+                    mentions: [user]
+                }).catch(() => {});
+            }
+
+            if (action === 'remove' && db.auto.autogoodbye) {
+                await sock.sendMessage(id, {
+                    text: `👋 Goodbye @${user.split('@')[0]}.`,
+                    mentions: [user]
+                }).catch(() => {});
+            }
+        }
+
+    } catch (error) {
+        console.error('[AUTO GROUP]', error.message);
+    }
+}
+
+// ======================================
+// AUTO BIO HANDLER
+// ======================================
+
+const bioTimers = new WeakMap();
+
+function startAutoBio(sock, db, config = {}) {
+    const previous = bioTimers.get(sock);
+
+    if (previous) clearInterval(previous);
+
+    const timer = setInterval(async () => {
+        if (db.auto?.autobio) {
+            try {
+                const time = new Date().toLocaleTimeString('en-US', {
+                    timeZone: config.timezone || 'Africa/Lagos'
+                });
+
+                await sock.updateProfileStatus(
+                    `🤖 META AI V2 | ${time} | Simon Tech`
+                );
+            } catch (error) {
+                console.error('[AUTO BIO]', error.message);
+            }
+        }
+
+        if (db.auto?.autoonline) {
+            await sock.sendPresenceUpdate('available').catch(() => {});
+        }
+
+    }, 60000);
+
+    bioTimers.set(sock, timer);
+}
+
+// ======================================
+// COMMANDS
+// ======================================
+
+const cmds = autoList.map(([key, label]) => ({
+    name: key,
+    category: 'auto',
+    ownerOnly: true,
+
+    run: async ctx => {
+        const value = String(ctx.args?.[0] || '').toLowerCase();
+
+        if (value !== 'on' && value !== 'off') {
+            return ctx.reply(
+                statusText(ctx.db, key, label, ctx.prefix)
+            );
+        }
+
+        setAuto(ctx.db, key, value === 'on');
+        saveDB(ctx);
+
+        return ctx.reply(
+            `✅ *${label}* is now *${value.toUpperCase()}*.`
+        );
+    }
 }));
 
 cmds.push({
-  name: 'auto', aliases: ['autolist'], category: 'auto', ownerOnly: true,
-  run: async ({db, reply, prefix}) => {
-    let txt = `◈┈▉ \`META AI MD\` ▉┄◈\n\n*⚙️ AUTO SETTINGS (${autoList.length})*\n\n`;
-    for(let k of autoList) txt += `${db.auto?.[k.key] ? '✅' : '❌'} ${k.key} : ${db.auto?.[k.key] ? 'ON' : 'OFF'}\n`;
-    txt += `\nUsage: ${prefix}autoread on\nOwner only\n\n©️ Created by Simon Tech Inc`;
-    return reply(txt);
-  }
+    name: 'auto',
+    aliases: ['autolist'],
+    category: 'auto',
+    ownerOnly: true,
+
+    run: async ({ db, reply, prefix }) => {
+        let output = `◈┈▉ META AI V2 ▉┄◈\n\n`;
+        output += `⚙️ *AUTO SETTINGS*\n\n`;
+
+        for (const [key, label] of autoList) {
+            output += `${db.auto?.[key] ? '✅' : '❌'} ${label}\n`;
+        }
+
+        output += `\nUsage: ${prefix}autoread on`;
+
+        return reply(output);
+    }
 });
 
 module.exports = cmds;
 module.exports.handleAuto = handleAuto;
 module.exports.handleStatus = handleStatus;
+module.exports.handleParticipants = handleParticipants;
 module.exports.startAutoBio = startAutoBio;
