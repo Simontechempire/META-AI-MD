@@ -38,6 +38,8 @@ module.exports = {
   // 'public' = everybody fit use bot
   // Change am here + push to make am permanent. .private / .public command na for temporary only.
   mode: 'private',
+  forceConfigMode: true,
+  forceConfigPrefix: true,
   language: 'en',
   timezone: 'Africa/Lagos',
   totalCmds: 300,
