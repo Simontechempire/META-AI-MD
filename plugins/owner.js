@@ -1,340 +1,716 @@
-// plugins/owner.js - OWNER MENU by Simon Tech
-// Public First + mode actually changes mode now
 
-function getRealMode(db, config){
-  // DB must win - this is what the user changed with ,mode. Config is only default for first start.
-  if (db?.settings?.mode) return db.settings.mode;
-  if (db?.mode) return db.mode;
-  if (config?.forceConfigMode && config?.mode) return config.mode;
-  return config?.mode || 'public';
+// plugins/owner.js
+// META AI V2 — OWNER MENU
+// © Simon Tech Inc
+
+function getRealMode(db, config) {
+  return db?.settings?.mode || db?.mode || config?.mode || 'public';
 }
-function getRealPrefix(db, config){
-  // Same for prefix - DB first, so ,setprefix does not reset
-  if (db?.settings?.prefix) return db.settings.prefix;
-  if (config?.forceConfigPrefix && config?.prefix) return config.prefix;
-  return config?.prefix || '.';
+
+function getRealPrefix(db, config) {
+  return db?.settings?.prefix || config?.prefix || '.';
 }
-// Ban must store both LID + PN so it matches in DM and group
-function getBanNums(ctx, target){
-  let nums = [];
-  let raw = String(target || '').split('@')[0].replace(/[^0-9]/g, '');
-  if (raw) nums.push(raw);
-  try {
-    let ctxInfo = ctx.m?.message?.extendedTextMessage?.contextInfo || ctx.m?.message?.imageMessage?.contextInfo || ctx.m?.message?.videoMessage?.contextInfo || {};
-    // Real PN is in participantPn, not mentionedJid (mentionedJid is often LID)
-    let pn = String(ctxInfo.participantPn || '').split('@')[0].replace(/[^0-9]/g, '');
-    if (pn && pn !== raw && !nums.includes(pn)) nums.push(pn);
-    // Quoted message PN
-    let qPn = String(ctxInfo.quotedMessage ? (ctx.m?.key?.participantPn || '') : '').split('@')[0].replace(/[^0-9]/g, '');
-    if (qPn && qPn !== raw && !nums.includes(qPn)) nums.push(qPn);
-    // Sender PN itself - for reply-to-self ban
-    let senderPn = String(ctx.m?.key?.participantPn || ctx.m?.key?.remoteJidAlt || '').split('@')[0].replace(/[^0-9]/g, '');
-    if (senderPn && senderPn !== raw && target && String(target).includes(senderPn)) nums.push(senderPn);
-  } catch(e){}
-  return nums;
+
+function cleanNumber(F, value) {
+  if (F?.cleanNumber) return F.cleanNumber(value);
+  return String(value || '').replace(/[^0-9]/g, '');
 }
-function getTargetPn(m, target){
-  // Return real PN for mentions, fallback to target
-  let pn = m?.key?.participantPn || m?.key?.remoteJidAlt || '';
-  if (pn && target && String(target).split('@')[0] !== String(pn).split('@')[0]) {
-    // Target is LID, PN is different - prefer PN for display
-    return pn;
+
+async function saveDB(F, db) {
+  if (typeof F?.saveDB === 'function') {
+    await F.saveDB(db);
   }
-  return target;
+}
+
+function getBanNums(target) {
+  const raw = String(target || '').split('@')[0].replace(/[^0-9]/g, '');
+  return raw ? [raw] : [];
+}
+
+function getTargetPn(target) {
+  return target || '';
 }
 
 module.exports = [
+
 {
-  name: 'menu', aliases: ['help', 'allmenu'], category: 'owner',
+  name: 'menu',
+  aliases: ['help', 'allmenu'],
+  category: 'owner',
   run: async ({ reply, prefix, config, db }) => {
     const { getMenu } = require('../lib/menu');
-    let realPrefix = getRealPrefix(db, config);
-    return reply(getMenu({ ownerName: config.ownerAlias, prefix: realPrefix, botUser: config.botName, hosting: config.hosting }));
+    return reply(getMenu({
+      ownerName: config.ownerAlias,
+      prefix: getRealPrefix(db, config),
+      botUser: config.botName,
+      hosting: config.hosting
+    }));
   }
 },
+
 {
-  name: 'ping', category: 'owner',
+  name: 'ping',
+  category: 'owner',
   run: async ({ reply, sock, config }) => {
-    let start = Date.now();
-    await sock.sendPresenceUpdate('available').catch(()=>{});
-    let ms = Date.now() - start;
-    return reply(`🏓 *Pong!* ${ms}ms\n⚡ META AI MD - Fast\n🕒 ${new Date().toLocaleString('en-US',{timeZone: config?.timezone || 'Africa/Lagos'})}`);
+    const start = Date.now();
+    await sock.sendPresenceUpdate('available').catch(() => {});
+    const ms = Date.now() - start;
+
+    return reply(
+      `🏓 *PONG!* ${ms}ms\n` +
+      `⚡ ${config.botName || 'META AI V2'}\n` +
+      `🕒 ${new Date().toLocaleString('en-US', {
+        timeZone: config.timezone || config.TIMEZONE || 'Africa/Lagos'
+      })}`
+    );
   }
 },
+
 {
-  name: 'alive', category: 'owner',
+  name: 'alive',
+  category: 'owner',
   run: async ({ reply, config, db, F }) => {
-    let mode = getRealMode(db, config);
-    let prefix = getRealPrefix(db, config);
-    return reply(`◈┈▉ \`META AI MD\` ▉┄◈\n\n✅ *I AM ALIVE!*\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n⏱️ Runtime: ${F ? F.runtime() : 'unknown'}\n\n©️ Created by Simon Tech Inc`);
+    return reply(
+      `◈┈▉ \`${config.botName || 'META AI V2'}\` ▉┄◈\n\n` +
+      `✅ *I AM ALIVE!*\n\n` +
+      `🤖 Bot: ${config.botName || 'META AI V2'}\n` +
+      `👑 Owner: ${config.ownerAlias || 'Simon'}\n` +
+      `⚡ Prefix: ${getRealPrefix(db, config)}\n` +
+      `🌐 Mode: ${getRealMode(db, config)}\n` +
+      `⏱️ Runtime: ${F?.runtime ? F.runtime() : 'Unknown'}\n\n` +
+      `©️ Simon Tech Inc`
+    );
   }
 },
+
 {
-  name: 'owner', category: 'owner',
+  name: 'owner',
+  category: 'owner',
   run: async ({ reply, sock, config, from }) => {
-    let vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${config.ownerAlias}\nORG:Simon Tech Inc;\nTEL;TYPE=CELL;TYPE=VOICE;waid=${config.ownerNumber}:${config.ownerNumber}\nEND:VCARD`;
+    const number = cleanNumber(null, config.ownerNumber);
+
+    if (!number) {
+      return reply('❌ Owner number is not configured.');
+    }
+
+    const vcard =
+      `BEGIN:VCARD\n` +
+      `VERSION:3.0\n` +
+      `FN:${config.ownerAlias || 'Owner'}\n` +
+      `ORG:Simon Tech Inc;\n` +
+      `TEL;TYPE=CELL;TYPE=VOICE;waid=${number}:+${number}\n` +
+      `END:VCARD`;
+
     try {
-      await sock.sendMessage(from, { contacts: { displayName: config.ownerAlias, contacts: [{ displayName: config.ownerAlias, vcard }] } });
-    } catch(e){
-      return reply(`👑 *OWNER*\nName: ${config.ownerAlias}\nNumber: +${config.ownerNumber}\nWA: https://wa.me/${config.ownerNumber}`);
+      await sock.sendMessage(from, {
+        contacts: {
+          displayName: config.ownerAlias || 'Owner',
+          contacts: [{
+            displayName: config.ownerAlias || 'Owner',
+            vcard
+          }]
+        }
+      });
+    } catch (e) {
+      return reply(
+        `👑 *OWNER*\n` +
+        `Name: ${config.ownerAlias || 'Owner'}\n` +
+        `Number: +${number}\n` +
+        `WhatsApp: https://wa.me/${number}`
+      );
     }
   }
 },
+
 {
-  name: 'runtime', category: 'owner',
-  run: async ({ reply, F }) => { return reply(`⏱️ *Runtime:* ${F.runtime()}\n\n©️ Created by Simon Tech Inc`); }
+  name: 'runtime',
+  category: 'owner',
+  run: async ({ reply, F }) => {
+    return reply(
+      `⏱️ *Runtime:* ${F?.runtime ? F.runtime() : 'Unknown'}\n\n` +
+      `©️ Simon Tech Inc`
+    );
+  }
 },
+
 {
-  name: 'botinfo', category: 'owner',
+  name: 'botinfo',
+  category: 'owner',
   run: async ({ reply, config, F, db }) => {
-    let mode = getRealMode(db, config);
-    let prefix = getRealPrefix(db, config);
-    return reply(`◈┈▉ \`META AI MD\` ▉┄◈\n\n🤖 Bot: ${config.botName}\n👑 Owner: ${config.ownerAlias}\n📞 Owner: +${config.ownerNumber}\n⚡ Prefix: ${prefix}\n🌐 Mode: ${mode}\n🖥️ Hosting: ${config.hosting}\n⏱️ Runtime: ${F.runtime()}\n📦 Total Commands: 300\n🕒 Timezone: ${config.timezone || 'Africa/Lagos'}\n\n©️ Created by Simon Tech Inc`);
+    return reply(
+      `◈┈▉ \`${config.botName || 'META AI V2'}\` ▉┄◈\n\n` +
+      `🤖 Bot: ${config.botName || 'META AI V2'}\n` +
+      `👑 Owner: ${config.ownerAlias || 'Simon'}\n` +
+      `📞 Owner: +${cleanNumber(null, config.ownerNumber)}\n` +
+      `⚡ Prefix: ${getRealPrefix(db, config)}\n` +
+      `🌐 Mode: ${getRealMode(db, config)}\n` +
+      `🖥️ Hosting: ${config.hosting || 'Unknown'}\n` +
+      `⏱️ Runtime: ${F?.runtime ? F.runtime() : 'Unknown'}\n` +
+      `📦 Commands: ${config.totalCommands || config.TOTAL_COMMANDS || 'Plugin-based'}\n` +
+      `🕒 Timezone: ${config.timezone || config.TIMEZONE || 'Africa/Lagos'}\n\n` +
+      `©️ Simon Tech Inc`
+    );
   }
 },
+
 {
-  name: 'restart', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { await reply('🔄 Restarting META AI MD...'); setTimeout(()=> process.exit(0), 1500); }
+  name: 'restart',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply }) => {
+    await reply('🔄 Restarting META AI V2...');
+    setTimeout(() => process.exit(0), 1500);
+  }
 },
+
 {
-  name: 'shutdown', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { await reply('🛑 Shutting down... Goodbye 👋'); setTimeout(()=> process.exit(0), 1000); }
+  name: 'shutdown',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply }) => {
+    await reply('🛑 Shutting down META AI V2...');
+    setTimeout(() => process.exit(0), 1000);
+  }
 },
+
 {
-  name: 'broadcast', aliases: ['bc'], category: 'owner', ownerOnly: true,
+  name: 'broadcast',
+  aliases: ['bc'],
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, sock, text, prefix }) => {
-    if (!text) return reply(`Usage: ${prefix}broadcast Hello everyone`);
-    let chats = await sock.groupFetchAllParticipating().catch(()=>({}));
-    let ids = Object.keys(chats);
-    let sent = 0, failed = 0;
-    for (let id of ids) {
-      try {
-        await sock.sendMessage(id, { text: `📢 *BROADCAST FROM META AI MD*\n\n${text}\n\n©️ Created by Simon Tech Inc` });
-        sent++;
-        await new Promise(r=>setTimeout(r, 1000));
-      } catch(e){ failed++; }
+    if (!text) {
+      return reply(`Usage: ${prefix}broadcast Your message`);
     }
-    return reply(`✅ Broadcast done\nSent: ${sent} groups\nFailed: ${failed}`);
+
+    const chats = await sock.groupFetchAllParticipating().catch(() => ({}));
+    const ids = Object.keys(chats);
+
+    if (!ids.length) return reply('❌ No joined groups found.');
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const id of ids) {
+      try {
+        await sock.sendMessage(id, {
+          text: `📢 *BROADCAST FROM META AI V2*\n\n${text}\n\n©️ Simon Tech Inc`
+        });
+        sent++;
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } catch (e) {
+        failed++;
+      }
+    }
+
+    return reply(
+      `📢 *BROADCAST REPORT*\n\n` +
+      `✅ Sent: ${sent}\n` +
+      `❌ Failed: ${failed}`
+    );
   }
 },
+
 {
-  name: 'setprefix', category: 'owner', ownerOnly: true,
+  name: 'setprefix',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, args, db, config, prefix, F }) => {
-    if (!args[0]) return reply(`Usage: ${prefix}setprefix !`);
-    const newPrefix = args[0];
-    if (newPrefix.length > 2) return reply('❌ Prefix too long. Use 1 character like , ! . #');
-    // Keep all old prefixes, put new one first - do not delete . , ! etc
-    let oldList = Array.isArray(config.prefixes) ? config.prefixes : [config.prefix || '.'];
-    let newList = [newPrefix, ...oldList.filter(p => p !== newPrefix)];
-    config.prefix = newPrefix;
-    config.prefixes = newList;
-    config.forceConfigPrefix = false;
-    if (!db.settings) db.settings = {};
+    const newPrefix = args?.[0];
+
+    if (!newPrefix) {
+      return reply(`Usage: ${prefix}setprefix !`);
+    }
+
+    if (newPrefix.length > 2 || /\s/.test(newPrefix)) {
+      return reply('❌ Prefix must be 1–2 characters with no spaces.');
+    }
+
+    db.settings = db.settings || {};
     db.settings.prefix = newPrefix;
-    db.settings.prefixes = newList;
-    if (F) F.saveDB(db);
-    return reply(`✅ Prefix changed to: ${newPrefix}\n\nNow use: ${newPrefix}menu\nAll old prefixes still work too.`);
-  }
-},
-{
-  name: 'setname', aliases: ['setbotname'], category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, text, prefix }) => {
-    if (!text) return reply(`Usage: ${prefix}setname META AI MD`);
-    await sock.updateProfileName(text).catch((e)=>{ return reply('Failed: '+e.message); });
-    return reply(`✅ Bot name changed to: ${text}`);
-  }
-},
-{
-  name: 'setbio', aliases: ['setstatus', 'setautobio'], category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, text, prefix }) => {
-    if (!text) return reply(`Usage: ${prefix}setbio I am META AI MD`);
-    await sock.updateProfileStatus(text).catch((e)=>{ return reply('Bio failed: '+e.message); });
-    return reply(`✅ Bio changed to: ${text}`);
-  }
-},
-{
-  name: 'setpp', category: 'owner', ownerOnly: true,
-  run: async ({ reply, sock, m, F, prefix }) => {
-    let buf = null;
+
+    config.prefix = newPrefix;
+
     try {
-      if (F?.downloadMedia) buf = await F.downloadMedia(m).catch(()=>null);
-      if (!buf) {
-        const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-        let msg = m.message?.imageMessage || m.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
+      await saveDB(F, db);
+      return reply(
+        `✅ Prefix changed to: ${newPrefix}\n\n` +
+        `Use: ${newPrefix}menu`
+      );
+    } catch (e) {
+      return reply(`❌ Could not save prefix: ${e.message}`);
+    }
+  }
+},
+
+{
+  name: 'setname',
+  aliases: ['setbotname'],
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply, sock, text, prefix }) => {
+    if (!text) return reply(`Usage: ${prefix}setname META AI V2`);
+
+    try {
+      await sock.updateProfileName(text);
+      return reply(`✅ WhatsApp profile name changed to: ${text}`);
+    } catch (e) {
+      return reply(`❌ Name update failed: ${e.message}`);
+    }
+  }
+},
+
+{
+  name: 'setbio',
+  aliases: ['setstatus', 'setautobio'],
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply, sock, text, prefix }) => {
+    if (!text) return reply(`Usage: ${prefix}setbio I am META AI V2`);
+
+    try {
+      await sock.updateProfileStatus(text);
+      return reply(`✅ WhatsApp bio changed successfully.`);
+    } catch (e) {
+      return reply(`❌ Bio update failed: ${e.message}`);
+    }
+  }
+},
+
+{
+  name: 'setpp',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply, sock, m, F, prefix }) => {
+    let buffer = null;
+
+    try {
+      if (F?.downloadMedia) {
+        buffer = await F.downloadMedia(m).catch(() => null);
+      }
+
+      if (!buffer) {
+        const { downloadContentFromMessage } =
+          require('@whiskeysockets/baileys');
+
+        const msg =
+          m.message?.imageMessage ||
+          m.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
+
         if (msg) {
-          let stream = await downloadContentFromMessage(msg, 'image');
-          let chunks = [];
-          for await (let c of stream) chunks.push(c);
-          buf = Buffer.concat(chunks);
+          const stream = await downloadContentFromMessage(msg, 'image');
+          const chunks = [];
+
+          for await (const chunk of stream) chunks.push(chunk);
+          buffer = Buffer.concat(chunks);
         }
       }
-    } catch(e){}
-    if (!buf) return reply(`Send / reply to an image first. ${prefix}setpp`);
-    try { await sock.updateProfilePicture(sock.user.id, buf); return reply('✅ Profile picture changed!'); } catch(e){ return reply('Failed: '+e.message); }
+    } catch (e) {}
+
+    if (!buffer) {
+      return reply(`❌ Send or reply to an image first.\nUsage: ${prefix}setpp`);
+    }
+
+    try {
+      await sock.updateProfilePicture(sock.user.id, buffer);
+      return reply('✅ Profile picture updated!');
+    } catch (e) {
+      return reply(`❌ Profile picture update failed: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'join', category: 'owner', ownerOnly: true,
+  name: 'join',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, sock, args, prefix }) => {
-    if (!args[0]) return reply(`Usage: ${prefix}join https://chat.whatsapp.com/xxx`);
-    let link = args[0].split('/').pop();
-    try { let r = await sock.groupAcceptInvite(link); return reply(`✅ Joined group: ${r}`); } catch(e){ return reply('Join failed: '+e.message); }
+    if (!args?.[0]) {
+      return reply(`Usage: ${prefix}join https://chat.whatsapp.com/INVITE`);
+    }
+
+    const code = args[0].split('/').pop().split('?')[0];
+
+    try {
+      const result = await sock.groupAcceptInvite(code);
+      return reply(`✅ Joined group: ${result}`);
+    } catch (e) {
+      return reply(`❌ Join failed: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'leave', category: 'owner', ownerOnly: true,
+  name: 'leave',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, sock, from, isGroup }) => {
-    if (!isGroup) return reply('Use this command in a group.');
-    await reply('👋 Leaving... Goodbye!');
-    await sock.groupLeave(from).catch(()=>{});
+    if (!isGroup) return reply('❌ Use this command inside a group.');
+
+    await reply('👋 Leaving group...');
+    try {
+      await sock.groupLeave(from);
+    } catch (e) {
+      return reply(`❌ Leave failed: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'block', category: 'owner', ownerOnly: true,
+  name: 'block',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, sock, m, F, args, prefix }) => {
-    let target = F.getTarget(m, args);
-    if (!target) return reply(`Reply / tag / number. ${prefix}block @user`);
-    await sock.updateBlockStatus(target, 'block').catch(()=>{});
-    let pn = getTargetPn(m, target);
-    return reply(`🚫 Blocked @${String(pn).split('@')[0]}`, { mentions: [pn] });
+    const target = F?.getTarget?.(m, args);
+
+    if (!target) {
+      return reply(`Reply, tag, or provide a number.\n${prefix}block @user`);
+    }
+
+    try {
+      await sock.updateBlockStatus(target, 'block');
+      const pn = getTargetPn(target);
+
+      return reply(
+        `🚫 Blocked @${String(pn).split('@')[0]}`,
+        { mentions: [pn] }
+      );
+    } catch (e) {
+      return reply(`❌ Block failed: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'unblock', category: 'owner', ownerOnly: true,
+  name: 'unblock',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, sock, m, F, args, prefix }) => {
-    let target = F.getTarget(m, args);
-    if (!target) return reply(`Reply / tag / number. ${prefix}unblock @user`);
-    await sock.updateBlockStatus(target, 'unblock').catch(()=>{});
-    let pn = getTargetPn(m, target);
-    return reply(`✅ Unblocked @${String(pn).split('@')[0]}`, { mentions: [pn] });
+    const target = F?.getTarget?.(m, args);
+
+    if (!target) {
+      return reply(`Reply, tag, or provide a number.\n${prefix}unblock @user`);
+    }
+
+    try {
+      await sock.updateBlockStatus(target, 'unblock');
+      const pn = getTargetPn(target);
+
+      return reply(
+        `✅ Unblocked @${String(pn).split('@')[0]}`,
+        { mentions: [pn] }
+      );
+    } catch (e) {
+      return reply(`❌ Unblock failed: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'ban', category: 'owner', ownerOnly: true,
-  run: async (ctx) => {
-    let { reply, m, F, args, prefix, db } = ctx;
-    let target = F.getTarget(m, args);
+  name: 'ban',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ctx => {
+    const { reply, m, F, args, prefix, db } = ctx;
+    const target = F?.getTarget?.(m, args);
+
     if (!target) return reply(`Usage: ${prefix}ban @user`);
-    if (!db.banned) db.banned = [];
-    let nums = getBanNums(ctx, target);
-    for (let num of nums) if (!db.banned.includes(num)) db.banned.push(num);
-    if (F) F.saveDB(db);
-    let pn = getTargetPn(m, target);
-    return reply(`🚫 Banned @${String(pn).split('@')[0]} - The bot will no longer reply to them.`, { mentions: [pn] });
+
+    db.banned = db.banned || [];
+
+    const nums = getBanNums(target);
+    if (!nums.length) return reply('❌ Could not identify that user.');
+
+    for (const num of nums) {
+      if (!db.banned.includes(num)) db.banned.push(num);
+    }
+
+    try {
+      await saveDB(F, db);
+      return reply(
+        `🚫 Banned @${String(target).split('@')[0]}.\n` +
+        `The bot will ignore this user if the message handler checks the ban list.`,
+        { mentions: [target] }
+      );
+    } catch (e) {
+      return reply(`❌ Could not save ban: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'unban', category: 'owner', ownerOnly: true,
-  run: async (ctx) => {
-    let { reply, m, F, args, db, prefix } = ctx;
-    let target = F.getTarget(m, args);
+  name: 'unban',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ctx => {
+    const { reply, m, F, args, prefix, db } = ctx;
+    const target = F?.getTarget?.(m, args);
+
     if (!target) return reply(`Usage: ${prefix}unban @user`);
-    if (!db.banned) db.banned = [];
-    let nums = getBanNums(ctx, target);
-    db.banned = db.banned.filter(x=>!nums.includes(x));
-    if (F) F.saveDB(db);
-    let pn = getTargetPn(m, target);
-    return reply(`✅ Unbanned @${String(pn).split('@')[0]}`, { mentions: [pn] });
+
+    db.banned = db.banned || [];
+
+    const nums = getBanNums(target);
+    db.banned = db.banned.filter(item => !nums.includes(item));
+
+    try {
+      await saveDB(F, db);
+      return reply(`✅ Unban list updated for @${String(target).split('@')[0]}.`);
+    } catch (e) {
+      return reply(`❌ Could not save changes: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'clearsession', category: 'owner', ownerOnly: true,
+  name: 'clearsession',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply }) => {
-    const fs = require('fs');
-    try { fs.rmSync('./Meta', { recursive: true, force: true }); return reply('✅ Session cleared. Restart the bot and pair again.'); } catch(e){ return reply('Failed: '+e.message); }
+    return reply(
+      '⚠️ Session deletion is disabled for safety.\n\n' +
+      'META AI V2 supports multiple linked accounts. ' +
+      'Deleting a shared session folder could disconnect other users.'
+    );
   }
 },
+
 {
-  name: 'getsession', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { return reply('📁 Session folder: ./Meta\nOn Render, go to Files > Meta to copy the session. Or re-pair with a new code.'); }
+  name: 'getsession',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply, config }) => {
+    const folder =
+      config.sessionDir ||
+      config.SESSION_DIR ||
+      'sessions';
+
+    return reply(
+      `📁 *SESSION DIRECTORY*\n\n` +
+      `Path: ./${folder}\n\n` +
+      `Each linked device should have its own session folder.`
+    );
+  }
 },
+
 {
-  name: 'setowner', category: 'owner', ownerOnly: true,
+  name: 'setowner',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, args, db, F, prefix }) => {
-    let num = F.cleanNumber(args[0]);
-    if (!num) return reply(`Usage: ${prefix}setowner 2348102350169`);
-    db.owners = [num];
-    if (!db.settings) db.settings = {};
-    db.settings.owner = num;
-    if (F) F.saveDB(db);
-    return reply(`✅ Main owner set to +${num}`);
+    const number = cleanNumber(F, args?.[0]);
+
+    if (!number) {
+      return reply(`Usage: ${prefix}setowner 234XXXXXXXXX`);
+    }
+
+    db.owners = [number];
+    db.settings = db.settings || {};
+    db.settings.owner = number;
+
+    try {
+      await saveDB(F, db);
+      return reply(`✅ Main owner changed to +${number}`);
+    } catch (e) {
+      return reply(`❌ Could not save owner: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'addowner', category: 'owner', ownerOnly: true,
+  name: 'addowner',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, args, db, F, prefix }) => {
-    let num = F.cleanNumber(args[0]);
-    if (!num) return reply(`Usage: ${prefix}addowner 2348102350169`);
-    if (!db.owners) db.owners = ['2348102350169'];
-    if (!db.owners.includes(num)) db.owners.push(num);
-    if (F) F.saveDB(db);
-    return reply(`✅ Added owner +${num}`);
+    const number = cleanNumber(F, args?.[0]);
+
+    if (!number) {
+      return reply(`Usage: ${prefix}addowner 234XXXXXXXXX`);
+    }
+
+    db.owners = db.owners || [];
+
+    if (db.owners.includes(number)) {
+      return reply('⚠️ This number is already an owner.');
+    }
+
+    db.owners.push(number);
+
+    try {
+      await saveDB(F, db);
+      return reply(`✅ Added owner +${number}`);
+    } catch (e) {
+      return reply(`❌ Could not save owner: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'delowner', category: 'owner', ownerOnly: true,
+  name: 'delowner',
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, args, db, F, prefix }) => {
-    let num = F.cleanNumber(args[0]);
-    if (!num) return reply(`Usage: ${prefix}delowner 2348102350169`);
-    if (!db.owners) db.owners = ['2348102350169'];
-    db.owners = db.owners.filter(x=>x!==num);
-    if (F) F.saveDB(db);
-    return reply(`✅ Removed owner +${num}`);
+    const number = cleanNumber(F, args?.[0]);
+
+    if (!number) {
+      return reply(`Usage: ${prefix}delowner 234XXXXXXXXX`);
+    }
+
+    db.owners = db.owners || [];
+
+    if (!db.owners.includes(number)) {
+      return reply('❌ Number is not in the owners list.');
+    }
+
+    if (db.owners.length <= 1) {
+      return reply('❌ You cannot remove the last owner.');
+    }
+
+    db.owners = db.owners.filter(item => item !== number);
+
+    try {
+      await saveDB(F, db);
+      return reply(`✅ Removed owner +${number}`);
+    } catch (e) {
+      return reply(`❌ Could not save changes: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'listowner', category: 'owner', ownerOnly: true,
-  run: async ({ reply, db }) => {
-    let owners = db.owners || ['2348102350169'];
-    return reply(`👑 *OWNERS LIST*\n\n${owners.map((o,i)=>`${i+1}. +${o}`).join('\n')}`);
+  name: 'listowner',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply, db, config }) => {
+    const owners = db.owners || [
+      cleanNumber(null, config.ownerNumber)
+    ].filter(Boolean);
+
+    if (!owners.length) return reply('No owners configured.');
+
+    return reply(
+      `👑 *OWNERS LIST*\n\n` +
+      owners.map((number, index) => `${index + 1}. +${number}`).join('\n')
+    );
   }
 },
+
 {
-  name: 'private', aliases: ['self'], category: 'owner', ownerOnly: true,
+  name: 'private',
+  aliases: ['self'],
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, db, config, F, prefix }) => {
     db.settings = db.settings || {};
     db.settings.mode = 'private';
     db.mode = 'private';
-    if (config) { config.mode = 'private'; config.forceConfigMode = false; }
-    if (F && F.saveDB) F.saveDB(db);
-    return reply(`🔒 Bot is now *PRIVATE* - Only the owner can use it.\n\nYour prefix is still: ${prefix}\nTry: ${prefix}menu`);
+
+    if (config) config.mode = 'private';
+
+    try {
+      await saveDB(F, db);
+      return reply(
+        `🔒 Bot mode: *PRIVATE*\n` +
+        `Only authorized owners should be able to use it.\n\n` +
+        `Prefix: ${prefix}`
+      );
+    } catch (e) {
+      return reply(`❌ Could not save mode: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'public', aliases: ['all'], category: 'owner', ownerOnly: true,
+  name: 'public',
+  aliases: ['all'],
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, db, config, F, prefix }) => {
     db.settings = db.settings || {};
     db.settings.mode = 'public';
     db.mode = 'public';
-    if (config) { config.mode = 'public'; config.forceConfigMode = false; }
-    if (F && F.saveDB) F.saveDB(db);
-    return reply(`🌍 Bot is now *PUBLIC* - Everyone can use it.\n\nYour prefix is still: ${prefix}\nTry: ${prefix}menu`);
+
+    if (config) config.mode = 'public';
+
+    try {
+      await saveDB(F, db);
+      return reply(
+        `🌍 Bot mode: *PUBLIC*\n` +
+        `Everyone can use the bot.\n\n` +
+        `Prefix: ${prefix}`
+      );
+    } catch (e) {
+      return reply(`❌ Could not save mode: ${e.message}`);
+    }
   }
 },
+
 {
-  name: 'mode', aliases: ['setmode'], category: 'owner', ownerOnly: true,
+  name: 'mode',
+  aliases: ['setmode'],
+  category: 'owner',
+  ownerOnly: true,
   run: async ({ reply, config, db, args, prefix, F }) => {
-    let newMode = (args?.[0] || '').toLowerCase();
+    const newMode = (args?.[0] || '').toLowerCase();
+
     if (newMode === 'public' || newMode === 'private') {
       db.settings = db.settings || {};
       db.settings.mode = newMode;
       db.mode = newMode;
-      if (config) { config.mode = newMode; config.forceConfigMode = false; }
-      if (F && F.saveDB) F.saveDB(db);
-      return reply(`✅ Mode changed to *${newMode.toUpperCase()}*\n${newMode === 'private' ? '🔒 Only the owner can use the bot now.' : '🌍 Everyone can use the bot now.'}\n\nPrefix: ${prefix}\nCheck with: ${prefix}mode`);
+
+      if (config) config.mode = newMode;
+
+      try {
+        await saveDB(F, db);
+        return reply(
+          `✅ Mode changed to *${newMode.toUpperCase()}*\n\n` +
+          `${newMode === 'private'
+            ? '🔒 Only authorized owners should use the bot.'
+            : '🌍 Everyone can use the bot.'}\n\n` +
+          `Prefix: ${getRealPrefix(db, config)}`
+        );
+      } catch (e) {
+        return reply(`❌ Could not save mode: ${e.message}`);
+      }
     }
-    if (newMode) return reply(`❌ Use: ${prefix}mode public OR ${prefix}mode private`);
-    let mode = getRealMode(db, config);
-    let pfx = getRealPrefix(db, config);
-    return reply(`🌐 *Current Mode:* ${mode.toUpperCase()}\n\n🔒 ${pfx}private = Only you\n🌍 ${pfx}public = Everyone\n⚙️ Change: ${pfx}mode public OR ${pfx}mode private\n\nPrefix: ${pfx}`);
+
+    if (newMode) {
+      return reply(`Usage: ${prefix}mode public OR ${prefix}mode private`);
+    }
+
+    return reply(
+      `🌐 *CURRENT MODE:* ${getRealMode(db, config).toUpperCase()}\n\n` +
+      `🔒 ${getRealPrefix(db, config)}private\n` +
+      `🌍 ${getRealPrefix(db, config)}public\n` +
+      `⚙️ ${getRealPrefix(db, config)}mode public/private`
+    );
   }
 },
+
 {
-  name: 'update', category: 'owner', ownerOnly: true,
-  run: async ({ reply }) => { return reply('🔄 Update: Pull the latest version from GitHub and restart.\nOn Render: Manual Deploy > Deploy latest commit'); }
+  name: 'update',
+  category: 'owner',
+  ownerOnly: true,
+  run: async ({ reply }) => {
+    return reply(
+      '🔄 *UPDATE META AI V2*\n\n' +
+      'On Render: Manual Deploy → Deploy latest commit.'
+    );
+  }
 },
+
 {
-  name: 'repo', aliases: ['sc', 'script'], category: 'owner',
-  run: async ({ reply }) => { return reply('📦 *META AI MD REPO*\n\nGitHub: https://github.com/Simontechempire/META-AI-MD\nOwner: Simon Tech\n\n⭐ Star the repo!'); }
-},
+  name: 'repo',
+  aliases: ['sc', 'script'],
+  category: 'owner',
+  run: async ({ reply }) => {
+    return reply(
+      `📦 *META AI V2 REPOSITORY*\n\n` +
+      `GitHub: https://github.com/Simontechempire/META-AI-MD\n` +
+      `Developer: Simon Tech Inc`
+    );
+  }
+}
+
 ];
+  
