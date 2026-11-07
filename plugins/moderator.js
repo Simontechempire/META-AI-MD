@@ -1,15 +1,19 @@
-// plugins/moderator.js - MODERATOR MENU by Simon Tech
+// plugins/moderator.js - FIXED LID + PN - MODERATOR MENU by Simon Tech
 // UNIQUE commands only - kick / promote / demote / warn / mute / delete / approve
 // already live in group.js. Do NOT duplicate them here - index.js keeps first wins.
-// Save DB, Admin + BotAdmin check
 
 function save(db, F){ if (F?.saveDB) F.saveDB(db); }
 function getNum(jid){ return String(jid||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); }
 function cleanNum(v){ return String(v||'').replace(/[^0-9]/g,''); }
+// FIXED: Check id + phoneNumber + lid
 function findParticipant(md, uid){
   if (!uid) return null;
   let num = getNum(uid);
-  return (md.participants || []).find(x => x.id === uid || x.phoneNumber === uid || getNum(x.phoneNumber) === num || getNum(x.id) === num);
+  return (md.participants || []).find(x => {
+    if (x.id === uid || x.phoneNumber === uid || x.lid === uid) return true;
+    let nums = [getNum(x.id), getNum(x.phoneNumber), getNum(x.lid)];
+    return nums.includes(num);
+  });
 }
 function resolveTarget(md, target){
   let p = findParticipant(md, target);
@@ -19,6 +23,7 @@ function displayNum(md, uid){
   if (!uid) return '';
   let p = md ? findParticipant(md, uid) : null;
   if (p?.phoneNumber) return getNum(p.phoneNumber);
+  if (p?.lid) return getNum(p.lid);
   return getNum(uid);
 }
 async function getMeta(ctx){
@@ -38,14 +43,19 @@ async function checkAdmin(ctx){
   await ctx.reply('❌ Only admins can use this command.');
   return false;
 }
+// FIXED: Check id + lid + pn
 async function checkBotAdmin(ctx){
   if (ctx.isBotAdmin) return true;
   try {
     let md = await getMeta(ctx);
     let sock = ctx.sock;
-    let myPn = sock.user?.id || '';
-    let myLid = sock.user?.lid || '';
-    let me = findParticipant(md, myPn) || findParticipant(md, myLid);
+    let botIds = [sock.user?.id, sock.user?.lid, sock.user?.pn].filter(Boolean);
+    let me = null;
+    for (let id of botIds) { me = findParticipant(md, id); if (me) break; }
+    if (!me && md) {
+      let botNums = botIds.map(getNum);
+      me = (md.participants || []).find(p => botNums.includes(getNum(p.id)) || botNums.includes(getNum(p.phoneNumber)) || botNums.includes(getNum(p.lid)));
+    }
     if (me && me.admin) return true;
     await ctx.reply('❌ The bot must be admin to do this. Make the bot admin first.');
     return false;
@@ -55,7 +65,6 @@ function needGroup(ctx){
   if (!ctx.isGroup) { ctx.reply('❌ Group only. Use this command inside a group.'); return false; }
   return true;
 }
-// FIXED: No longer depends only on F.getTarget
 function getTargetLocal(ctx){
   if (typeof ctx.F?.getTarget === 'function') {
     try { let t = ctx.F.getTarget(ctx.m, ctx.args); if(t) return t; } catch {}
@@ -76,7 +85,6 @@ async function getTargetResolved(ctx){
 async function sendMention(ctx, text, jid){
   return ctx.sock.sendMessage(ctx.from, { text, mentions: jid ? [jid] : [] });
 }
-// FIXED: Handler for .restrict - index.js must call this BEFORE anti.js
 async function handleMuted(sock, m, db, F){
   try{
     const from = m?.key?.remoteJid;
@@ -86,7 +94,6 @@ async function handleMuted(sock, m, db, F){
     if(!muted.length) return false;
     let sender = m.key.participant || m.key.remoteJid;
     let senderPn = m.key.participantPn || sender;
-    // Match by LID or PN
     let hit = muted.includes(sender) || muted.includes(senderPn) || muted.some(x => getNum(x)===getNum(sender) || getNum(x)===getNum(senderPn));
     if(!hit) return false;
     await sock.sendMessage(from, { delete: m.key }).catch(()=>{});
@@ -101,7 +108,6 @@ module.exports = [
     if (!needGroup(ctx)) return;
     if (!await checkAdmin(ctx)) return;
     if (!await checkBotAdmin(ctx)) return;
-    // FIXED: Fallback if F.cleanNumber missing
     let num = typeof ctx.F?.cleanNumber === 'function' ? ctx.F.cleanNumber(ctx.args[0]) : cleanNum(ctx.args[0]);
     if (!num) return ctx.reply(`Usage: ${ctx.prefix}add 234XXXXXXXXXX`);
     try { await ctx.sock.groupParticipantsUpdate(ctx.from, [`${num}@s.whatsapp.net`], 'add'); return ctx.reply(`✅ Added +${num}`); } catch(e){ return ctx.reply(`Add failed - user may need to send a request or the bot is not admin.\nSend link: ${ctx.prefix}grouplink`); }
@@ -172,7 +178,6 @@ module.exports = [
     if(!ctx.db.muted[ctx.from]) ctx.db.muted[ctx.from]=[];
     if(!ctx.db.muted[ctx.from].includes(target)) ctx.db.muted[ctx.from].push(target);
     save(ctx.db, ctx.F);
-    // FIXED: Use sendMessage for mentions, not reply(text, {mentions})
     return sendMention(ctx, `🚫 Restricted @${displayNum(r.md, target)} - The bot will delete their messages.`, target);
   }
 },
@@ -221,14 +226,12 @@ module.exports = [
   name: 'removeall', category: 'moderator', groupOnly: true,
   run: async (ctx) => {
     if (!needGroup(ctx)) return;
-    // ONLY OWNER can use this dangerous command, not just admin
     if (!ctx.isOwner) return ctx.reply('❌ Only the OWNER can use removeall. Too dangerous.');
     if (!await checkBotAdmin(ctx)) return;
     if (ctx.args[0] !== 'confirm') return ctx.reply(`⚠️ DANGER! This will remove ALL members.\nType: ${ctx.prefix}removeall confirm`);
     let md = await getMeta(ctx);
-    // FIXED: Exclude bot + owners - owner may not be admin, don't remove owner
     let ownerNums = [...(ctx.db.owners || []), ctx.config?.ownerNumber].map(cleanNum).filter(Boolean);
-    let botNums = [getNum(ctx.sock.user?.id), getNum(ctx.sock.user?.lid)].filter(Boolean);
+    let botNums = [getNum(ctx.sock.user?.id), getNum(ctx.sock.user?.lid), getNum(ctx.sock.user?.pn)].filter(Boolean);
     let others = (md?.participants || []).filter(p=>{
       if(p.admin) return false;
       let n = displayNum(md, p.id);
