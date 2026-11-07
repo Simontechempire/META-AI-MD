@@ -1,6 +1,4 @@
-// META AI MD - INDEX.JS - FIXED ALL
-// SIMON TECH INC - LOADS ALL PLUGINS + BUILT-IN ANTI/AUTO
-
+// META AI MD - INDEX.JS - FIXED ALL - SIMON TECH INC
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -9,12 +7,10 @@ const pino = require('pino');
 const config = require('./config');
 const F = require('./lib/function');
 const { getMenu, MENU_PFP } = require('./lib/menu');
-
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 const PORT = config.port || process.env.PORT || 10000;
-
 let sock = null;
 let db = F.loadDB() || {};
 let isStarting = false;
@@ -23,14 +19,12 @@ if (!db.settings) db.settings = {};
 if (!db.anti) db.anti = {};
 if (!db.group) db.group = {};
 if (!db.auto) db.auto = {};
-if (!db.warns) db.warns = {}; // { groupId: { userJid: count } }
-
+if (!db.warns) db.warns = {};
 function fancy(text){
   const map={a:'𝐚',b:'𝐛',c:'𝐜',d:'𝐝',e:'𝐞',f:'𝐟',g:'𝐠',h:'𝐡',i:'𝐢',j:'𝐣',k:'𝐤',l:'𝐥',m:'𝐦',n:'𝐧',o:'𝐨',p:'𝐩',q:'𝐪',r:'𝐫',s:'𝐬',t:'𝐭',u:'𝐮',v:'𝐯',w:'𝐰',x:'𝐱',y:'𝐲',z:'𝐳',A:'𝐀',B:'𝐁',C:'𝐂',D:'𝐃',E:'𝐄',F:'𝐅',G:'𝐆',H:'𝐇',I:'𝐈',J:'𝐉',K:'𝐊',L:'𝐋',M:'𝐌',N:'𝐍',O:'𝐎',P:'𝐏',Q:'𝐐',R:'𝐑',S:'𝐒',T:'𝐓',U:'𝐔',V:'𝐕',W:'𝐖',X:'𝐗',Y:'𝐘',Z:'𝐙',0:'𝟎',1:'𝟏',2:'𝟐',3:'𝟑',4:'𝟒',5:'𝟓',6:'𝟔',7:'𝟕',8:'𝟖',9:'𝟗'};
   return String(text).split('').map(c=>map[c]||c).join('');
 }
 F.fancy = fancy; F.bold = fancy;
-
 function getNums(...jids){
   let out=[];
   for(let j of jids){ let n=String(j||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); if(n) out.push(n); }
@@ -61,13 +55,9 @@ function getPrefixes(){
   if(config.prefix && !list.includes(config.prefix)) list.push(config.prefix);
   return [...new Set(list)];
 }
-
-// ================= FIXED PLUGIN LOADER - LOADS ALL SHAPES =================
-// FIX: Old loader missed {commands: [...]} - na why all cmd be demo
 let commands = new Map();
 let functionPlugins = [];
 let handlerMods = [];
-
 function extractCommands(plugin){
   let list=[];
   if(!plugin) return list;
@@ -75,7 +65,6 @@ function extractCommands(plugin){
   if(Array.isArray(plugin.commands)) list.push(...plugin.commands);
   if(Array.isArray(plugin.plugins)) list.push(...plugin.plugins);
   if(plugin.name && typeof plugin.run==='function') list.push(plugin);
-  // Object where each value is a command e.g { kick: {name, run} }
   if(!list.length && typeof plugin==='object'){
     for(let v of Object.values(plugin)){
       if(v && v.name && typeof v.run==='function') list.push(v);
@@ -84,7 +73,6 @@ function extractCommands(plugin){
   }
   return list;
 }
-
 function loadPlugins(){
   commands.clear(); functionPlugins=[]; handlerMods=[];
   const dir = path.join(__dirname, 'plugins');
@@ -96,7 +84,6 @@ function loadPlugins(){
       delete require.cache[require.resolve(fullPath)];
       let plugin = require(fullPath);
       if(plugin?.default) plugin = plugin.default;
-      // Handlers - check top level AND inside .handlers
       let handlers = {};
       let src = plugin || {};
       let handlerSrc = src.handlers || src;
@@ -133,8 +120,6 @@ function getHandler(name){
   for(let m of handlerMods) if(m.handlers[name]) out.push(m.handlers[name]);
   return out;
 }
-
-// ================= SERVER =================
 app.get('/ping',(req,res)=>res.send('pong'));
 app.get('/status',(req,res)=>res.json({connected:Boolean(sock?.user), user:sock?.user?.id||null, commands:commands.size, mode:getMode(db)}));
 app.get('/pair', async (req,res)=>{
@@ -150,23 +135,18 @@ app.get('/pair', async (req,res)=>{
 app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.listen(PORT,()=>console.log(`🌐 Server running on port ${PORT}`));
 setInterval(async()=>{ try{ const url=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`; await fetch(`${url}/ping`); }catch{} }, 4*60*1000);
-
-// ================= FIXED GROUP ADMIN CHECK - LID + PN + FALLBACK =================
-// FIX: Old code trusted F.findParticipant only. If it returned null, botAdmin = false even when bot IS admin.
 async function getGroupPermissions(from, sender, senderPn){
   try{
     const metadata = await sock.groupMetadata(from);
     const participants = metadata.participants||[];
     const sNums = getNums(sender, senderPn);
     const bNums = getNums(sock?.user?.id, sock?.user?.lid, sock?.user?.pn);
-    // Manual find - no depend on F
     const findByNums = (nums) => participants.find(p=>{
       const pNums = getNums(p.id, p.phoneNumber, p.lid);
       return nums.some(n=> pNums.includes(n)) || pNums.some(n=> nums.includes(n));
     });
     let participant = findByNums(sNums);
     let bot = findByNums(bNums);
-    // Fallback: try F if manual failed
     if(!participant && F.findParticipant) participant = F.findParticipant(metadata, sender) || F.findParticipant(metadata, senderPn);
     if(!bot && F.findParticipant) bot = F.findParticipant(metadata, sock?.user?.id) || F.findParticipant(metadata, sock?.user?.lid);
     const isAdmin = ['admin','superadmin'].includes(participant?.admin);
@@ -174,25 +154,20 @@ async function getGroupPermissions(from, sender, senderPn){
     return { isAdmin, isBotAdmin, metadata, participant, bot };
   }catch(e){ return {isAdmin:false,isBotAdmin:false,metadata:null}; }
 }
-
-// ================= BUILT-IN ANTILINK - DELETE + WARN 3 = KICK =================
-// FIX: This runs INSIDE index, no depend on plugin. So even if plugin fails, anti works.
 async function builtInAntiLink(sock, m, from, sender, senderPn, body, perms, isOwner){
-  if(!isOwner && perms.isAdmin) return false; // Admins exempt
-  const anti = db.anti?.[from];
-  if(!anti?.antilink) return false;
+  if(!isOwner && perms.isAdmin) return false;
+  const anti = db.anti?.[from] || db.group?.[from];
+  const on = anti?.antilink || anti?.antiLink || anti?.antilinkEnabled;
+  if(!on) return false;
   const linkRegex = /(https?:\/\/|www\.|chat\.whatsapp\.com\/|wa\.me\/|t\.me\/|telegram\.me\/|discord\.gg\/|instagram\.com\/|youtube\.com\/|youtu\.be\/)/i;
   if(!linkRegex.test(body)) return false;
-  // 1. DELETE LINK FIRST - no be only warn
   await sock.sendMessage(from, { delete: m.key }).catch(()=>{});
-  // 2. WARN COUNTER
   if(!db.warns[from]) db.warns[from] = {};
-  const key = sender; // use full JID
+  const key = sender;
   db.warns[from][key] = (db.warns[from][key]||0) + 1;
   const count = db.warns[from][key];
   F.saveDB(db);
   if(count >= 3){
-    // 3. KICK ON 3RD VIOLATION
     delete db.warns[from][key];
     F.saveDB(db);
     await sock.sendMessage(from, { text: `🚫 @${getNums(sender)[0]} don reach 3 warnings for sending link. Kicking...`, mentions:[sender] }).catch(()=>{});
@@ -204,33 +179,19 @@ async function builtInAntiLink(sock, m, from, sender, senderPn, body, perms, isO
   } else {
     await sock.sendMessage(from, { text: `⚠️ @${getNums(sender)[0]} No link allowed here!\nWarning ${count}/3 - Next na kick.\nLink deleted ✅`, mentions:[sender] }).catch(()=>{});
   }
-  return true; // blocked
+  return true;
 }
-
-// ================= BUILT-IN AUTO - REAL, NO DEMO =================
 async function builtInAuto(sock, m, from, db){
   const auto = db.auto || {};
-  try{
-    // Auto read
-    if(auto.autoread || auto.read) await sock.readMessages([m.key]).catch(()=>{});
-    // Auto status view is handled in status listener below
-  }catch{}
+  try{ if(auto.autoread || auto.read) await sock.readMessages([m.key]).catch(()=>{}); }catch{}
 }
-
 async function builtInAutoStatus(sock, message){
   const auto = db.auto || {};
   try{
-    if(auto.autoview || auto.autoviewstatus || auto.viewstatus){
-      await sock.readMessages([message.key]).catch(()=>{});
-    }
-    if(auto.autolike || auto.autolikestatus){
-      // Like status with ❤️ - real Baileys reaction
-      await sock.sendMessage('status@broadcast', { react: { text: '❤️', key: message.key } }).catch(()=>{});
-    }
+    if(auto.autoview || auto.autoviewstatus || auto.viewstatus) await sock.readMessages([message.key]).catch(()=>{});
+    if(auto.autolike || auto.autolikestatus) await sock.sendMessage('status@broadcast', { react: { text: '❤️', key: message.key } }).catch(()=>{});
   }catch(e){ console.log('Auto status error:', e.message); }
 }
-
-// ================= WHATSAPP CONNECTION =================
 async function start(){
   if(isStarting) return; isStarting=true;
   if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
@@ -255,7 +216,6 @@ async function start(){
         if(!reconnectTimer) reconnectTimer=setTimeout(()=>{ reconnectTimer=null; start(); },5000);
       }
     });
-    // AUTO STATUS - REAL
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let message of messages){
         try{
@@ -311,18 +271,12 @@ async function start(){
           let permissions={isAdmin:false,isBotAdmin:false,metadata:null};
           if(isGroup) permissions=await getGroupPermissions(from, sender, senderPn);
           if(isOwner) permissions.isAdmin=true;
-
-          // ===== BUILT-IN AUTO FIRST (real) =====
           if(!m.key.fromMe) await builtInAuto(sock, m, from, db);
-
-          // ===== BUILT-IN ANTILINK - DELETE + WARN 3 = KICK =====
-          // Runs BEFORE plugin, so e must work even if plugin fails
           let blockedByAnti = false;
           if(!m.key.fromMe && isGroup && !isOwner){
             blockedByAnti = await builtInAntiLink(sock, m, from, sender, senderPn, body, permissions, isOwner);
             if(blockedByAnti){ F.saveDB(db); continue; }
           }
-
           if(!blockedByAnti && !m.key.fromMe){
             try{
               for(let fn of getHandler('handleMuted')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } }
@@ -370,7 +324,6 @@ async function start(){
           if(plugin.ownerOnly && !isOwner){ await reply(config.messages?.ownerOnly || '❌ Owner only command.'); continue; }
           if(plugin.groupOnly && !isGroup){ await reply(config.messages?.groupOnly || '❌ Group only command.'); continue; }
           if(plugin.adminOnly && !permissions.isAdmin && !isOwner){ await reply('❌ Admins only.'); continue; }
-          // FIX: botAdminOnly check - now uses FIXED permissions, no go lie again
           if((plugin.botAdminOnly || plugin.botAdmin) && !permissions.isBotAdmin){ await reply('❌ The bot must be an admin. Make bot admin first.'); continue; }
           try{ await plugin.run(ctx); }catch(e){ console.log(`Cmd ${cmdName} error:`, e.message); await reply(`❌ Command error: ${e.message}`); }
           F.saveDB(db);
