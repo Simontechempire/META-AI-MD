@@ -53,9 +53,7 @@ function getMode(database){
   const mode = database.settings?.mode || database.mode || config.mode || 'public';
   return String(mode).toLowerCase()==='private' ? 'private' : 'public';
 }
-}
 function getPrefixes(){
-  // FIXED: db.settings.prefix first, then config.prefixes / config.prefix
   let p = db.settings?.prefix || config.prefix || '.';
   let list = [];
   if(Array.isArray(config.prefixes)) list.push(...config.prefixes);
@@ -67,7 +65,7 @@ function getPrefixes(){
 // ================= GENERIC PLUGIN LOADER - LOADS ALL =================
 let commands = new Map();
 let functionPlugins = [];
-let handlerMods = []; // any plugin that exports handleAnti / handleAuto / handleProtection / handleMuted / handleStatus / handleParticipants / handleDelete / startAutoBio
+let handlerMods = [];
 
 function loadPlugins(){
   commands.clear(); functionPlugins=[]; handlerMods=[];
@@ -79,7 +77,6 @@ function loadPlugins(){
       const fullPath = path.join(dir, file);
       delete require.cache[require.resolve(fullPath)];
       const plugin = require(fullPath);
-      // Collect handlers generically - NOT hardcoded to anti/auto
       let handlers = {};
       for(let k of ['handleAnti','handleAuto','handleProtection','handleParticipantProtection','handleMuted','handleStatus','handleParticipants','handleDelete','startAutoBio']){
         if(typeof plugin?.[k]==='function') handlers[k]=plugin[k];
@@ -95,7 +92,6 @@ function loadPlugins(){
       for(const command of list){
         if(!command?.name || typeof command.run!=='function') continue;
         let name=command.name.toLowerCase();
-        // FIXED: Duplicate check - keep first, warn, don't silently overwrite
         if(commands.has(name)){ console.log(`⚠️ Duplicate command ${name} in ${file} - keeping first, skipping this one`); continue; }
         commands.set(name, command); added++;
         if(Array.isArray(command.aliases)){
@@ -141,7 +137,6 @@ async function getGroupPermissions(from, sender, senderPn){
   try{
     const metadata = await sock.groupMetadata(from);
     const participants = metadata.participants||[];
-    // FIXED: Use F.findParticipant if available, else match LID + PN + number
     let participant=null, bot=null;
     if(F.findParticipant){
       participant = F.findParticipant(metadata, sender) || F.findParticipant(metadata, senderPn);
@@ -181,7 +176,6 @@ async function start(){
         if(!reconnectTimer) reconnectTimer=setTimeout(()=>{ reconnectTimer=null; start(); },5000);
       }
     });
-    // STATUS
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let message of messages){
         try{
@@ -191,25 +185,19 @@ async function start(){
         }catch(e){ console.log('Status handler error:', e.message); }
       }
     });
-    // ANTIDELETE
     sock.ev.on('messages.update', async updates=>{
       try{ for(let fn of getHandler('handleDelete')) await fn(sock, updates, db, F, config); }catch(e){ console.log('Anti-delete error:', e.message); }
     });
-    // GROUP PARTICIPANTS - FIXED: Call ALL handlers, not just inline welcome
     sock.ev.on('group-participants.update', async update=>{
       try{
         if(getMode(db)==='private') return;
-        // 1. Protection antipromote / antidemote
         for(let fn of getHandler('handleParticipantProtection')) await fn(sock, update, db, F, config);
-        // 2. Auto welcome / goodbye + custom per-group messages
-        // Use handlerMods that export handleParticipants (auto.js) - it already checks db.auto + per-group? Fallback inline if none
         let handled=false;
         for(let fn of getHandler('handleParticipants')){ await fn(sock, update, db, F, config); handled=true; }
         if(!handled){
           const from=update.id; const group=db.group?.[from]; if(!group) return;
           for(let participant of update.participants||[]){
             let pn = F.getPn ? F.getPn(participant) : participant.split('@')[0];
-            // Try resolve PN via group meta
             try{ let md=await sock.groupMetadata(from); let p = F.findParticipant ? F.findParticipant(md, participant) : null; if(p?.phoneNumber) pn=getNums(p.phoneNumber)[0]; }catch{}
             if(update.action==='add' && (group.welcome || db.auto?.autowelcome)){
               let msg=(group.welcomeMsg||'👋 Welcome @user to *{group}*!\n\nType .menu').replace(/@user/g,`@${pn}`).replace(/\{group\}/g, update.subject||'group');
@@ -223,7 +211,6 @@ async function start(){
         }
       }catch(e){ console.log('Group event error:', e.message); }
     });
-    // MESSAGE HANDLER
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let m of messages){
         try{
@@ -243,37 +230,28 @@ async function start(){
             isOwner=true;
           }
           if(getMode(db)==='private' && !isOwner) continue;
-          // FIXED: Ban check BOTH LID + PN
           if(!isOwner && db.banned?.length && senderNums.some(n=>db.banned.includes(n))) continue;
-          // Group permissions early - needed for admin bypass in handlers
           let permissions={isAdmin:false,isBotAdmin:false,metadata:null};
           if(isGroup) permissions=await getGroupPermissions(from, sender, senderPn);
           if(isOwner) permissions.isAdmin=true;
-          // FIXED ORDER: Muted -> Protection -> Anti -> Auto
           if(!m.key.fromMe){
-            // 1. MUTED (moderator .restrict)
             try{
               for(let fn of getHandler('handleMuted')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
-              // Legacy inline muted check if no handler
               if(!getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
                 let hit=db.muted[from].some(x=> senderNums.includes(getNums(x)[0]) || x===sender || x===senderPn);
                 if(hit && !isOwner && !permissions.isAdmin){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); continue; }
               }
             }catch(e){ console.log('Muted handler error:', e.message); }
-            // 2. PROTECTION (antibot / antiforeign)
             try{
               for(let fn of getHandler('handleProtection')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
             }catch(e){ console.log('Protection handler error:', e.message); }
-            // 3. ANTI (antilink etc) - skip if sender is admin/owner, anti.js also checks
             try{
               for(let fn of getHandler('handleAnti')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
             }catch(e){ console.log('Anti handler error:', e.message); }
-            // 4. AUTO
             try{
               for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config);
             }catch(e){ console.log('Auto handler error:', e.message); }
           }
-          // Prefix check - FIXED: Use db.settings.prefix
           const prefixes=getPrefixes();
           const usedPrefix=prefixes.find(p=>body.startsWith(p));
           if(!usedPrefix) continue;
