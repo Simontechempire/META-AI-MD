@@ -1,5 +1,5 @@
-// META AI MD - INDEX.JS - OLD METHOD FIXED
-// SIMON TECH INC
+// META AI MD - INDEX.JS
+// SIMON TECH INC - LOADS ALL PLUGINS GENERICALLY
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
@@ -30,6 +30,7 @@ function fancy(text){
 }
 F.fancy = fancy; F.bold = fancy;
 
+// FIXED: Check BOTH LID and PN
 function getNums(...jids){
   let out=[];
   for(let j of jids){ let n=String(j||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); if(n) out.push(n); }
@@ -61,7 +62,7 @@ function getPrefixes(){
   return [...new Set(list)];
 }
 
-// ================= GENERIC PLUGIN LOADER =================
+// ================= GENERIC PLUGIN LOADER - LOADS ALL =================
 let commands = new Map();
 let functionPlugins = [];
 let handlerMods = [];
@@ -86,20 +87,17 @@ function loadPlugins(){
       let list=[];
       if(Array.isArray(plugin)) list=plugin;
       else if(Array.isArray(plugin?.plugins)) list=plugin.plugins;
-      // FIX 1: AUTO NOT FOUND - also check .commands / .cmds
-      else if(Array.isArray(plugin?.commands)) list=plugin.commands;
-      else if(Array.isArray(plugin?.cmds)) list=plugin.cmds;
       else if(plugin?.name) list=[plugin];
       let added=0;
       for(const command of list){
         if(!command?.name || typeof command.run!=='function') continue;
         let name=command.name.toLowerCase();
-        if(commands.has(name)){ console.log(`⚠️ Duplicate command ${name} in ${file} - keeping first`); continue; }
+        if(commands.has(name)){ console.log(`⚠️ Duplicate command ${name} in ${file} - keeping first, skipping this one`); continue; }
         commands.set(name, command); added++;
         if(Array.isArray(command.aliases)){
           for(let alias of command.aliases){
             let a=String(alias).toLowerCase();
-            if(commands.has(a)) continue;
+            if(commands.has(a)){ console.log(`⚠️ Duplicate alias ${a} in ${file} - keeping first, skipping`); continue; }
             commands.set(a, command);
           }
         }
@@ -117,6 +115,7 @@ function getHandler(name){
   return out;
 }
 
+// ================= SERVER =================
 app.get('/ping',(req,res)=>res.send('pong'));
 app.get('/status',(req,res)=>res.json({connected:Boolean(sock?.user), user:sock?.user?.id||null, commands:commands.size, mode:getMode(db)}));
 app.get('/pair', async (req,res)=>{
@@ -133,6 +132,7 @@ app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')))
 app.listen(PORT,()=>console.log(`🌐 Server running on port ${PORT}`));
 setInterval(async()=>{ try{ const url=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`; await fetch(`${url}/ping`); }catch{} }, 4*60*1000);
 
+// ================= GROUP ADMIN CHECK - LID + PN =================
 async function getGroupPermissions(from, sender, senderPn){
   try{
     const metadata = await sock.groupMetadata(from);
@@ -151,6 +151,7 @@ async function getGroupPermissions(from, sender, senderPn){
   }catch(e){ return {isAdmin:false,isBotAdmin:false,metadata:null}; }
 }
 
+// ================= WHATSAPP CONNECTION =================
 async function start(){
   if(isStarting) return; isStarting=true;
   if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
@@ -175,11 +176,11 @@ async function start(){
         if(!reconnectTimer) reconnectTimer=setTimeout(()=>{ reconnectTimer=null; start(); },5000);
       }
     });
-    // STATUS - NO private block, like OLD fixed version
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let message of messages){
         try{
           if(message.key?.remoteJid!=='status@broadcast') continue;
+          if(getMode(db)==='private') continue;
           for(let fn of getHandler('handleStatus')) await fn(sock, message, db, F, config);
         }catch(e){ console.log('Status handler error:', e.message); }
       }
@@ -187,9 +188,9 @@ async function start(){
     sock.ev.on('messages.update', async updates=>{
       try{ for(let fn of getHandler('handleDelete')) await fn(sock, updates, db, F, config); }catch(e){ console.log('Anti-delete error:', e.message); }
     });
-    // GROUP JOIN/LEAVE - NO private block
     sock.ev.on('group-participants.update', async update=>{
       try{
+        if(getMode(db)==='private') return;
         for(let fn of getHandler('handleParticipantProtection')) await fn(sock, update, db, F, config);
         let handled=false;
         for(let fn of getHandler('handleParticipants')){ await fn(sock, update, db, F, config); handled=true; }
@@ -219,7 +220,8 @@ async function start(){
           const senderPn=m.key.participantPn || m.key.remoteJidAlt || sender;
           const senderNums=getNums(sender, senderPn);
           const pushname=m.pushName||'User';
-          const body=F.getText(m) || '';
+          const body=F.getText(m);
+          if(!body) continue;
           const isGroup=F.isGroup(from);
           let isOwner=isOwnerCheck(sender, senderPn, db);
           if(m.key.fromMe){
@@ -227,38 +229,29 @@ async function start(){
             if(!prefixes.some(p=>body.startsWith(p))) continue;
             isOwner=true;
           }
+          if(getMode(db)==='private' && !isOwner) continue;
           if(!isOwner && db.banned?.length && senderNums.some(n=>db.banned.includes(n))) continue;
           let permissions={isAdmin:false,isBotAdmin:false,metadata:null};
           if(isGroup) permissions=await getGroupPermissions(from, sender, senderPn);
           if(isOwner) permissions.isAdmin=true;
-
-          // ===== OLD METHOD: Anti/Auto BEFORE private + BEFORE body check =====
-          // FIX 2: ADMIN CMD FIX - only block if handler returns === true (strict), NOT truthy object
           if(!m.key.fromMe){
-            let blocked = false;
             try{
-              for(let fn of getHandler('handleMuted')){ let b=await fn(sock, m, db, F, config); if(b===true){ F.saveDB(db); blocked=true; break; } }
-              if(!blocked && !getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
+              for(let fn of getHandler('handleMuted')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
+              if(!getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
                 let hit=db.muted[from].some(x=> senderNums.includes(getNums(x)[0]) || x===sender || x===senderPn);
-                if(hit && !isOwner && !permissions.isAdmin){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); blocked=true; }
+                if(hit && !isOwner && !permissions.isAdmin){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); continue; }
               }
             }catch(e){ console.log('Muted handler error:', e.message); }
-            if(!blocked){
-              try{ for(let fn of getHandler('handleProtection')){ let b=await fn(sock, m, db, F, config); if(b===true){ F.saveDB(db); blocked=true; break; } } }catch(e){ console.log('Protection handler error:', e.message); }
-            }
-            if(!blocked){
-              try{ for(let fn of getHandler('handleAnti')){ let b=await fn(sock, m, db, F, config); if(b===true){ F.saveDB(db); blocked=true; break; } } }catch(e){ console.log('Anti handler error:', e.message); }
-            }
-            if(!blocked){
-              try{ for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config); }catch(e){ console.log('Auto handler error:', e.message); }
-            }
-            if(blocked) continue;
+            try{
+              for(let fn of getHandler('handleProtection')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
+            }catch(e){ console.log('Protection handler error:', e.message); }
+            try{
+              for(let fn of getHandler('handleAnti')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
+            }catch(e){ console.log('Anti handler error:', e.message); }
+            try{
+              for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config);
+            }catch(e){ console.log('Auto handler error:', e.message); }
           }
-
-          // Private blocks COMMANDS only, not anti/auto above
-          if(getMode(db)==='private' && !isOwner) continue;
-          if(!body) continue;
-
           const prefixes=getPrefixes();
           const usedPrefix=prefixes.find(p=>body.startsWith(p));
           if(!usedPrefix) continue;
@@ -277,7 +270,7 @@ async function start(){
           const ctx={ sock, m, from, sender, senderNum:getNums(sender)[0], senderPn, senderNums, pushname, args, text, q:text, cmd:cmdName, cmdName, prefix:usedPrefix, isOwner, isGroup, isAdmin:permissions.isAdmin, isBotAdmin:permissions.isBotAdmin, metadata:permissions.metadata, db, config, F, reply, fancy, fancyReply };
           let handled=false;
           for(let plugin of functionPlugins){
-            try{ let result=await plugin.fn(sock, m, ctx); if(result===true){ handled=true; F.saveDB(db); break; } }catch(e){ console.log('Function plugin error:', plugin.file, e.message); }
+            try{ let result=await plugin.fn(sock, m, ctx); if(result){ handled=true; F.saveDB(db); break; } }catch(e){ console.log('Function plugin error:', plugin.file, e.message); }
           }
           if(handled) continue;
           const plugin=commands.get(cmdName);
