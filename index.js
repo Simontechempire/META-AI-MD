@@ -49,8 +49,10 @@ function isOwnerCheck(sender, senderPn, database){
   return nums.some(n=>owners.includes(n));
 }
 function getMode(database){
+  if(config.forceMode && config.mode) return String(config.mode).toLowerCase()==='private' ? 'private' : 'public';
   const mode = database.settings?.mode || database.mode || config.mode || 'public';
   return String(mode).toLowerCase()==='private' ? 'private' : 'public';
+}
 }
 function getPrefixes(){
   // FIXED: db.settings.prefix first, then config.prefixes / config.prefix
