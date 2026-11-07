@@ -30,7 +30,6 @@ function fancy(text){
 }
 F.fancy = fancy; F.bold = fancy;
 
-// FIXED: Check BOTH LID and PN
 function getNums(...jids){
   let out=[];
   for(let j of jids){ let n=String(j||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); if(n) out.push(n); }
@@ -62,7 +61,7 @@ function getPrefixes(){
   return [...new Set(list)];
 }
 
-// ================= GENERIC PLUGIN LOADER - LOADS ALL =================
+// ================= GENERIC PLUGIN LOADER =================
 let commands = new Map();
 let functionPlugins = [];
 let handlerMods = [];
@@ -132,7 +131,6 @@ app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')))
 app.listen(PORT,()=>console.log(`🌐 Server running on port ${PORT}`));
 setInterval(async()=>{ try{ const url=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`; await fetch(`${url}/ping`); }catch{} }, 4*60*1000);
 
-// ================= GROUP ADMIN CHECK - LID + PN =================
 async function getGroupPermissions(from, sender, senderPn){
   try{
     const metadata = await sock.groupMetadata(from);
@@ -176,11 +174,12 @@ async function start(){
         if(!reconnectTimer) reconnectTimer=setTimeout(()=>{ reconnectTimer=null; start(); },5000);
       }
     });
+
+    // STATUS - FIXED: NO private block. autoview/autolikestatus must work even in private.
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let message of messages){
         try{
           if(message.key?.remoteJid!=='status@broadcast') continue;
-          if(getMode(db)==='private') continue;
           for(let fn of getHandler('handleStatus')) await fn(sock, message, db, F, config);
         }catch(e){ console.log('Status handler error:', e.message); }
       }
@@ -188,9 +187,10 @@ async function start(){
     sock.ev.on('messages.update', async updates=>{
       try{ for(let fn of getHandler('handleDelete')) await fn(sock, updates, db, F, config); }catch(e){ console.log('Anti-delete error:', e.message); }
     });
+
+    // GROUP JOIN/LEAVE - FIXED: NO private block. welcome/goodbye are auto, not commands.
     sock.ev.on('group-participants.update', async update=>{
       try{
-        if(getMode(db)==='private') return;
         for(let fn of getHandler('handleParticipantProtection')) await fn(sock, update, db, F, config);
         let handled=false;
         for(let fn of getHandler('handleParticipants')){ await fn(sock, update, db, F, config); handled=true; }
@@ -211,6 +211,7 @@ async function start(){
         }
       }catch(e){ console.log('Group event error:', e.message); }
     });
+
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let m of messages){
         try{
@@ -220,38 +221,52 @@ async function start(){
           const senderPn=m.key.participantPn || m.key.remoteJidAlt || sender;
           const senderNums=getNums(sender, senderPn);
           const pushname=m.pushName||'User';
-          const body=F.getText(m);
-          if(!body) continue;
+          const body=F.getText(m) || '';
           const isGroup=F.isGroup(from);
           let isOwner=isOwnerCheck(sender, senderPn, db);
           if(m.key.fromMe){
             let prefixes=getPrefixes();
-            if(!prefixes.some(p=>body.startsWith(p))) continue;
+            if(!prefixes.some(p=>body.startsWith(p))) {
+              // fromMe but no prefix = still let anti/auto skip, but don't process as command
+              // Still continue - owner own messages no need anti
+              continue;
+            }
             isOwner=true;
           }
-          if(getMode(db)==='private' && !isOwner) continue;
           if(!isOwner && db.banned?.length && senderNums.some(n=>db.banned.includes(n))) continue;
+
           let permissions={isAdmin:false,isBotAdmin:false,metadata:null};
           if(isGroup) permissions=await getGroupPermissions(from, sender, senderPn);
           if(isOwner) permissions.isAdmin=true;
+
+          // ===== FIXED ORDER: Protection / Anti / Auto run BEFORE private + BEFORE body check =====
+          // Private blocks COMMANDS only, not protection/auto. Media (sticker/image) has no body, so must run here.
           if(!m.key.fromMe){
+            let blocked = false;
             try{
-              for(let fn of getHandler('handleMuted')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
-              if(!getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
+              for(let fn of getHandler('handleMuted')){ let b=await fn(sock, m, db, F, config); if(b){ F.saveDB(db); blocked=true; break; } }
+              if(!blocked && !getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
                 let hit=db.muted[from].some(x=> senderNums.includes(getNums(x)[0]) || x===sender || x===senderPn);
-                if(hit && !isOwner && !permissions.isAdmin){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); continue; }
+                if(hit && !isOwner && !permissions.isAdmin){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); blocked=true; }
               }
             }catch(e){ console.log('Muted handler error:', e.message); }
-            try{
-              for(let fn of getHandler('handleProtection')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
-            }catch(e){ console.log('Protection handler error:', e.message); }
-            try{
-              for(let fn of getHandler('handleAnti')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); continue; } }
-            }catch(e){ console.log('Anti handler error:', e.message); }
-            try{
-              for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config);
-            }catch(e){ console.log('Auto handler error:', e.message); }
+            if(!blocked){
+              try{ for(let fn of getHandler('handleProtection')){ let b=await fn(sock, m, db, F, config); if(b){ F.saveDB(db); blocked=true; break; } } }catch(e){ console.log('Protection handler error:', e.message); }
+            }
+            if(!blocked){
+              try{ for(let fn of getHandler('handleAnti')){ let b=await fn(sock, m, db, F, config); if(b){ F.saveDB(db); blocked=true; break; } } }catch(e){ console.log('Anti handler error:', e.message); }
+            }
+            // Auto never blocks - run it even if blocked? No: if anti deleted it, skip auto react to avoid reacting to deleted msg
+            if(!blocked){
+              try{ for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config); }catch(e){ console.log('Auto handler error:', e.message); }
+            }
+            if(blocked) continue; // REAL block - skip command processing for this message
           }
+
+          // ===== AFTER protection: private + command handling =====
+          if(getMode(db)==='private' && !isOwner) continue;
+          if(!body) continue; // media with no text has already been handled by anti/auto above
+
           const prefixes=getPrefixes();
           const usedPrefix=prefixes.find(p=>body.startsWith(p));
           if(!usedPrefix) continue;
