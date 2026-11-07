@@ -1,4 +1,4 @@
-// META AI MD - GROUP PLUGIN
+// META AI MD - GROUP PLUGIN - FIXED LID + BOT ADMIN + WARN 3 = KICK
 // Developer: Simon Tech Inc
 
 function needGroup(isGroup, reply) {
@@ -8,7 +8,6 @@ function needGroup(isGroup, reply) {
 function getNum(jid){ return String(jid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, ''); }
 function displayId(p) {
   if (!p) return '';
-  // FIXED: phoneNumber first - id is LID in new WhatsApp, phoneNumber is real PN
   const id = typeof p === 'string' ? p : (p.phoneNumber || p.id || '');
   return getNum(id);
 }
@@ -18,15 +17,19 @@ async function getMeta(ctx, from) {
     return await ctx.sock.groupMetadata(from);
   } catch { return null; }
 }
+// FIXED: Check id + phoneNumber + lid + all numbers
 function findMember(md, uid){
   if (!md || !uid) return null;
   let num = getNum(uid);
-  return (md.participants || []).find(p => p.id === uid || p.phoneNumber === uid || getNum(p.id) === num || getNum(p.phoneNumber) === num);
+  return (md.participants || []).find(p => {
+    if (p.id === uid || p.phoneNumber === uid || p.lid === uid) return true;
+    let pNums = [getNum(p.id), getNum(p.phoneNumber), getNum(p.lid)];
+    return pNums.includes(num);
+  });
 }
 async function needAdmin(ctx) {
   if (ctx.isOwner || ctx.isAdmin) return true;
   const md = await getMeta(ctx, ctx.from);
-  // FIXED: Use F.findParticipant if index/function provides it
   let member = null;
   if (ctx.F?.findParticipant) member = ctx.F.findParticipant(md, ctx.sender) || ctx.F.findParticipant(md, ctx.senderPn);
   if (!member) member = findMember(md, ctx.sender) || findMember(md, ctx.senderPn);
@@ -34,14 +37,21 @@ async function needAdmin(ctx) {
   await ctx.reply('❌ Admins only.');
   return false;
 }
+// FIXED: Try ctx.isBotAdmin first, then id + lid + pn
 async function needBotAdmin(ctx, from) {
   if (ctx.isBotAdmin) return true;
   const md = await getMeta(ctx, from);
-  const botId = ctx.sock.user?.id || '';
-  const botLid = ctx.sock.user?.lid || '';
+  const botIds = [ctx.sock.user?.id, ctx.sock.user?.lid, ctx.sock.user?.pn].filter(Boolean);
   let bot = null;
-  if (ctx.F?.findParticipant) bot = ctx.F.findParticipant(md, botId) || ctx.F.findParticipant(md, botLid);
-  if (!bot) bot = findMember(md, botId) || findMember(md, botLid);
+  for (let id of botIds) {
+    if (ctx.F?.findParticipant) bot = ctx.F.findParticipant(md, id);
+    if (!bot) bot = findMember(md, id);
+    if (bot) break;
+  }
+  if (!bot && md) {
+    let botNums = botIds.map(getNum);
+    bot = (md.participants || []).find(p => botNums.includes(getNum(p.id)) || botNums.includes(getNum(p.phoneNumber)) || botNums.includes(getNum(p.lid)));
+  }
   if (bot?.admin) return true;
   await ctx.reply('❌ The bot must be an admin.');
   return false;
@@ -50,10 +60,8 @@ function resolveTarget(md, target) {
   if (!target) return null;
   let num = getNum(target);
   let member = findMember(md, target);
-  // FIXED: If target is PN like 234..., build PN JID directly - member may have LID as id, but groupParticipantsUpdate accepts PN JID too
   return member?.id || (num ? `${num}@s.whatsapp.net` : null);
 }
-// FIXED: No longer depends on F.getTarget. Fallback: mentioned -> quoted -> args number
 function getTarget(ctx) {
   if (typeof ctx.F?.getTarget === 'function') {
     try { let t = ctx.F.getTarget(ctx.m, ctx.args); if (t) return t; } catch {}
@@ -63,7 +71,6 @@ function getTarget(ctx) {
   if (ctxInfo.mentionedJid?.length) return ctxInfo.mentionedJid[0];
   if (ctxInfo.participant) return ctxInfo.participant;
   if (ctxInfo.quotedMessage && ctxInfo.participant) return ctxInfo.participant;
-  // args: .kick 2348101234567 or .kick @234...
   let arg = String(ctx.args?.[0] || '').replace(/[^0-9]/g, '');
   if (arg.length >= 7) return `${arg}@s.whatsapp.net`;
   return null;
@@ -268,7 +275,6 @@ module.exports = [
     if (value !== 'on' && value !== 'off') return ctx.reply(`Usage: ${ctx.prefix}welcome on/off`);
     ctx.db.group ||= {}; ctx.db.group[ctx.from] ||= {};
     ctx.db.group[ctx.from].welcome = value === 'on';
-    // FIXED: Also sync to auto.js - auto handler checks db.auto.autowelcome
     ctx.db.auto ||= {}; ctx.db.auto.autowelcome = value === 'on';
     save(ctx.db, ctx.F);
     return ctx.reply(`👋 Welcome: ${value.toUpperCase()}`);
@@ -348,9 +354,18 @@ module.exports = [
     if (!jid) return ctx.reply('❌ Member not found.');
     ctx.db.warns ||= {}; ctx.db.warns[ctx.from] ||= {};
     ctx.db.warns[ctx.from][jid] = (ctx.db.warns[ctx.from][jid] || 0) + 1;
+    const count = ctx.db.warns[ctx.from][jid];
     save(ctx.db, ctx.F);
-    // FIXED: Show PN in text, not LID
-    return mentionReply(ctx, `⚠️ Warning issued to @${displayId(findMember(md, jid) || jid)}: ${ctx.db.warns[ctx.from][jid]}/3`, jid);
+    if (count >= 3) {
+      delete ctx.db.warns[ctx.from][jid]; save(ctx.db, ctx.F);
+      if (await needBotAdmin(ctx, ctx.from)) {
+        await ctx.sock.groupParticipantsUpdate(ctx.from, [jid], 'remove').catch(()=>{});
+        return mentionReply(ctx, `🚫 @${displayId(findMember(md, jid) || jid)} don reach 3 warnings. Kicked.`, jid);
+      } else {
+        return mentionReply(ctx, `⚠️ @${displayId(findMember(md, jid) || jid)} don reach 3 warnings but bot no be admin, so e no fit kick.`, jid);
+      }
+    }
+    return mentionReply(ctx, `⚠️ Warning issued to @${displayId(findMember(md, jid) || jid)}: ${count}/3`, jid);
   }
 },
 {
