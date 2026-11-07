@@ -3,23 +3,23 @@
 // already live in group.js. Do NOT duplicate them here - index.js keeps first wins.
 // Save DB, Admin + BotAdmin check
 
-function save(db, F){ if (F) F.saveDB(db); }
-
+function save(db, F){ if (F?.saveDB) F.saveDB(db); }
+function getNum(jid){ return String(jid||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); }
+function cleanNum(v){ return String(v||'').replace(/[^0-9]/g,''); }
 function findParticipant(md, uid){
   if (!uid) return null;
-  let num = String(uid).split('@')[0].replace(/[^0-9]/g, '');
-  return (md.participants || []).find(x => x.id === uid || x.phoneNumber === uid || String(x.phoneNumber || '').split('@')[0] === num || String(x.id || '').split('@')[0] === num);
+  let num = getNum(uid);
+  return (md.participants || []).find(x => x.id === uid || x.phoneNumber === uid || getNum(x.phoneNumber) === num || getNum(x.id) === num);
 }
 function resolveTarget(md, target){
   let p = findParticipant(md, target);
   return p ? p.id : target;
 }
-// Display real PN, not LID
 function displayNum(md, uid){
   if (!uid) return '';
   let p = md ? findParticipant(md, uid) : null;
-  if (p?.phoneNumber) return String(p.phoneNumber).split('@')[0].replace(/[^0-9]/g, '');
-  return String(uid).split('@')[0].replace(/[^0-9]/g, '');
+  if (p?.phoneNumber) return getNum(p.phoneNumber);
+  return getNum(uid);
 }
 async function getMeta(ctx){
   try {
@@ -27,15 +27,12 @@ async function getMeta(ctx){
     return await ctx.sock.groupMetadata(ctx.from);
   } catch(e){ return null; }
 }
-
 async function checkAdmin(ctx){
   if (ctx.isOwner) return true;
   if (ctx.isAdmin) return true;
   try {
     let md = await getMeta(ctx);
-    let p = findParticipant(md, ctx.sender);
-    if (!p && ctx.senderNum) p = findParticipant(md, ctx.senderNum);
-    if (!p && ctx.senderPn) p = findParticipant(md, ctx.senderPn);
+    let p = findParticipant(md, ctx.sender) || findParticipant(md, ctx.senderPn) || findParticipant(md, ctx.senderNum);
     if (p && p.admin) return true;
   } catch(e){}
   await ctx.reply('❌ Only admins can use this command.');
@@ -46,10 +43,9 @@ async function checkBotAdmin(ctx){
   try {
     let md = await getMeta(ctx);
     let sock = ctx.sock;
-    let myNum = String(sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
     let myPn = sock.user?.id || '';
-    let myLid = String(sock.user?.lid || '').split('@')[0].replace(/[^0-9]/g, '');
-    let me = (md?.participants || []).find(p => p.id === myPn || p.phoneNumber === myPn || String(p.phoneNumber || '').split('@')[0] === myNum || String(p.id || '').split('@')[0] === myNum || (myLid && String(p.id || '').split('@')[0] === myLid));
+    let myLid = sock.user?.lid || '';
+    let me = findParticipant(md, myPn) || findParticipant(md, myLid);
     if (me && me.admin) return true;
     await ctx.reply('❌ The bot must be admin to do this. Make the bot admin first.');
     return false;
@@ -59,11 +55,43 @@ function needGroup(ctx){
   if (!ctx.isGroup) { ctx.reply('❌ Group only. Use this command inside a group.'); return false; }
   return true;
 }
+// FIXED: No longer depends only on F.getTarget
+function getTargetLocal(ctx){
+  if (typeof ctx.F?.getTarget === 'function') {
+    try { let t = ctx.F.getTarget(ctx.m, ctx.args); if(t) return t; } catch {}
+  }
+  let ctxInfo = ctx.m?.message?.extendedTextMessage?.contextInfo || ctx.m?.message?.imageMessage?.contextInfo || ctx.m?.message?.videoMessage?.contextInfo || {};
+  if (ctxInfo.mentionedJid?.length) return ctxInfo.mentionedJid[0];
+  if (ctxInfo.participant) return ctxInfo.participant;
+  let arg = String(ctx.args?.[0] || '').replace(/[^0-9]/g,'');
+  if (arg.length >= 7) return `${arg}@s.whatsapp.net`;
+  return null;
+}
 async function getTargetResolved(ctx){
-  let target = ctx.F.getTarget(ctx.m, ctx.args);
+  let target = getTargetLocal(ctx);
   if (!target) return null;
   let md = await getMeta(ctx);
   return { target: resolveTarget(md, target), md };
+}
+async function sendMention(ctx, text, jid){
+  return ctx.sock.sendMessage(ctx.from, { text, mentions: jid ? [jid] : [] });
+}
+// FIXED: Handler for .restrict - index.js must call this BEFORE anti.js
+async function handleMuted(sock, m, db, F){
+  try{
+    const from = m?.key?.remoteJid;
+    if(!from?.endsWith('@g.us')) return false;
+    if(m.key.fromMe || !m.message) return false;
+    let muted = db.muted?.[from] || [];
+    if(!muted.length) return false;
+    let sender = m.key.participant || m.key.remoteJid;
+    let senderPn = m.key.participantPn || sender;
+    // Match by LID or PN
+    let hit = muted.includes(sender) || muted.includes(senderPn) || muted.some(x => getNum(x)===getNum(sender) || getNum(x)===getNum(senderPn));
+    if(!hit) return false;
+    await sock.sendMessage(from, { delete: m.key }).catch(()=>{});
+    return true;
+  }catch(e){ return false; }
 }
 
 module.exports = [
@@ -73,7 +101,8 @@ module.exports = [
     if (!needGroup(ctx)) return;
     if (!await checkAdmin(ctx)) return;
     if (!await checkBotAdmin(ctx)) return;
-    let num = ctx.F.cleanNumber(ctx.args[0]);
+    // FIXED: Fallback if F.cleanNumber missing
+    let num = typeof ctx.F?.cleanNumber === 'function' ? ctx.F.cleanNumber(ctx.args[0]) : cleanNum(ctx.args[0]);
     if (!num) return ctx.reply(`Usage: ${ctx.prefix}add 234XXXXXXXXXX`);
     try { await ctx.sock.groupParticipantsUpdate(ctx.from, [`${num}@s.whatsapp.net`], 'add'); return ctx.reply(`✅ Added +${num}`); } catch(e){ return ctx.reply(`Add failed - user may need to send a request or the bot is not admin.\nSend link: ${ctx.prefix}grouplink`); }
   }
@@ -143,7 +172,8 @@ module.exports = [
     if(!ctx.db.muted[ctx.from]) ctx.db.muted[ctx.from]=[];
     if(!ctx.db.muted[ctx.from].includes(target)) ctx.db.muted[ctx.from].push(target);
     save(ctx.db, ctx.F);
-    return ctx.reply(`🚫 Restricted @${displayNum(r.md, target)} - The bot will delete their messages.`, { mentions: [target] });
+    // FIXED: Use sendMessage for mentions, not reply(text, {mentions})
+    return sendMention(ctx, `🚫 Restricted @${displayNum(r.md, target)} - The bot will delete their messages.`, target);
   }
 },
 {
@@ -154,9 +184,9 @@ module.exports = [
     let r = await getTargetResolved(ctx);
     if (!r?.target) return ctx.reply(`Usage: ${ctx.prefix}unrestrict @user`);
     let target = r.target;
-    if(ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target);
+    if(ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target && getNum(x)!==getNum(target));
     save(ctx.db, ctx.F);
-    return ctx.reply(`✅ Unrestricted @${displayNum(r.md, target)}`, { mentions: [target] });
+    return sendMention(ctx, `✅ Unrestricted @${displayNum(r.md, target)}`, target);
   }
 },
 {
@@ -184,7 +214,7 @@ module.exports = [
     if(ctx.db.warns?.[ctx.from]) ctx.db.warns[ctx.from][target]=0;
     if(ctx.db.muted?.[ctx.from]) ctx.db.muted[ctx.from]=ctx.db.muted[ctx.from].filter(x=>x!==target);
     save(ctx.db, ctx.F);
-    return ctx.reply(`✅ Reset @${displayNum(r.md, target)} - Warnings + mute cleared.`, { mentions: [target] });
+    return sendMention(ctx, `✅ Reset @${displayNum(r.md, target)} - Warnings + mute cleared.`, target);
   }
 },
 {
@@ -196,7 +226,16 @@ module.exports = [
     if (!await checkBotAdmin(ctx)) return;
     if (ctx.args[0] !== 'confirm') return ctx.reply(`⚠️ DANGER! This will remove ALL members.\nType: ${ctx.prefix}removeall confirm`);
     let md = await getMeta(ctx);
-    let others = (md?.participants || []).filter(p=>!p.admin).map(p=>p.id);
+    // FIXED: Exclude bot + owners - owner may not be admin, don't remove owner
+    let ownerNums = [...(ctx.db.owners || []), ctx.config?.ownerNumber].map(cleanNum).filter(Boolean);
+    let botNums = [getNum(ctx.sock.user?.id), getNum(ctx.sock.user?.lid)].filter(Boolean);
+    let others = (md?.participants || []).filter(p=>{
+      if(p.admin) return false;
+      let n = displayNum(md, p.id);
+      if(ownerNums.includes(n)) return false;
+      if(botNums.includes(n)) return false;
+      return true;
+    }).map(p=>p.id);
     let removed = 0;
     for(let id of others){ try{ await ctx.sock.groupParticipantsUpdate(ctx.from, [id], 'remove'); removed++; await new Promise(r=>setTimeout(r,1000)); }catch(e){} }
     return ctx.reply(`✅ Removed ${removed} members.`);
@@ -225,3 +264,4 @@ module.exports = [
   }
 },
 ];
+module.exports.handleMuted = handleMuted;
