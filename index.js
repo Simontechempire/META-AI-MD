@@ -1,5 +1,5 @@
-// META AI MD - INDEX.JS
-// SIMON TECH INC - LOADS ALL PLUGINS GENERICALLY
+// META AI MD - INDEX.JS - FIXED ALL
+// SIMON TECH INC - LOADS ALL PLUGINS + BUILT-IN ANTI/AUTO
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
@@ -23,6 +23,7 @@ if (!db.settings) db.settings = {};
 if (!db.anti) db.anti = {};
 if (!db.group) db.group = {};
 if (!db.auto) db.auto = {};
+if (!db.warns) db.warns = {}; // { groupId: { userJid: count } }
 
 function fancy(text){
   const map={a:'𝐚',b:'𝐛',c:'𝐜',d:'𝐝',e:'𝐞',f:'𝐟',g:'𝐠',h:'𝐡',i:'𝐢',j:'𝐣',k:'𝐤',l:'𝐥',m:'𝐦',n:'𝐧',o:'𝐨',p:'𝐩',q:'𝐪',r:'𝐫',s:'𝐬',t:'𝐭',u:'𝐮',v:'𝐯',w:'𝐰',x:'𝐱',y:'𝐲',z:'𝐳',A:'𝐀',B:'𝐁',C:'𝐂',D:'𝐃',E:'𝐄',F:'𝐅',G:'𝐆',H:'𝐇',I:'𝐈',J:'𝐉',K:'𝐊',L:'𝐋',M:'𝐌',N:'𝐍',O:'𝐎',P:'𝐏',Q:'𝐐',R:'𝐑',S:'𝐒',T:'𝐓',U:'𝐔',V:'𝐕',W:'𝐖',X:'𝐗',Y:'𝐘',Z:'𝐙',0:'𝟎',1:'𝟏',2:'𝟐',3:'𝟑',4:'𝟒',5:'𝟓',6:'𝟔',7:'𝟕',8:'𝟖',9:'𝟗'};
@@ -30,7 +31,6 @@ function fancy(text){
 }
 F.fancy = fancy; F.bold = fancy;
 
-// FIXED: Check BOTH LID and PN
 function getNums(...jids){
   let out=[];
   for(let j of jids){ let n=String(j||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); if(n) out.push(n); }
@@ -62,10 +62,28 @@ function getPrefixes(){
   return [...new Set(list)];
 }
 
-// ================= GENERIC PLUGIN LOADER - LOADS ALL =================
+// ================= FIXED PLUGIN LOADER - LOADS ALL SHAPES =================
+// FIX: Old loader missed {commands: [...]} - na why all cmd be demo
 let commands = new Map();
 let functionPlugins = [];
 let handlerMods = [];
+
+function extractCommands(plugin){
+  let list=[];
+  if(!plugin) return list;
+  if(Array.isArray(plugin)) list.push(...plugin);
+  if(Array.isArray(plugin.commands)) list.push(...plugin.commands);
+  if(Array.isArray(plugin.plugins)) list.push(...plugin.plugins);
+  if(plugin.name && typeof plugin.run==='function') list.push(plugin);
+  // Object where each value is a command e.g { kick: {name, run} }
+  if(!list.length && typeof plugin==='object'){
+    for(let v of Object.values(plugin)){
+      if(v && v.name && typeof v.run==='function') list.push(v);
+      if(Array.isArray(v)) for(let c of v) if(c?.name && typeof c.run==='function') list.push(c);
+    }
+  }
+  return list;
+}
 
 function loadPlugins(){
   commands.clear(); functionPlugins=[]; handlerMods=[];
@@ -76,29 +94,30 @@ function loadPlugins(){
     try{
       const fullPath = path.join(dir, file);
       delete require.cache[require.resolve(fullPath)];
-      const plugin = require(fullPath);
+      let plugin = require(fullPath);
+      if(plugin?.default) plugin = plugin.default;
+      // Handlers - check top level AND inside .handlers
       let handlers = {};
+      let src = plugin || {};
+      let handlerSrc = src.handlers || src;
       for(let k of ['handleAnti','handleAuto','handleProtection','handleParticipantProtection','handleMuted','handleStatus','handleParticipants','handleDelete','startAutoBio']){
-        if(typeof plugin?.[k]==='function') handlers[k]=plugin[k];
+        if(typeof handlerSrc?.[k]==='function') handlers[k]=handlerSrc[k];
+        if(typeof src?.[k]==='function') handlers[k]=src[k];
       }
       if(Object.keys(handlers).length) handlerMods.push({ file, handlers });
       if(typeof plugin==='function'){ functionPlugins.push({file, fn:plugin}); console.log(`✅ Loaded ${file}: function plugin`); continue; }
-      if(plugin && typeof plugin.handler==='function'){ functionPlugins.push({file, fn:plugin.handler}); continue; }
-      let list=[];
-      if(Array.isArray(plugin)) list=plugin;
-      else if(Array.isArray(plugin?.plugins)) list=plugin.plugins;
-      else if(plugin?.name) list=[plugin];
+      if(plugin && typeof plugin.handler==='function'){ functionPlugins.push({file, fn:plugin.handler}); }
+      let list = extractCommands(plugin);
       let added=0;
       for(const command of list){
         if(!command?.name || typeof command.run!=='function') continue;
         let name=command.name.toLowerCase();
-        if(commands.has(name)){ console.log(`⚠️ Duplicate command ${name} in ${file} - keeping first, skipping this one`); continue; }
+        if(commands.has(name)){ console.log(`⚠️ Duplicate ${name} in ${file} - skipping`); continue; }
         commands.set(name, command); added++;
         if(Array.isArray(command.aliases)){
           for(let alias of command.aliases){
             let a=String(alias).toLowerCase();
-            if(commands.has(a)){ console.log(`⚠️ Duplicate alias ${a} in ${file} - keeping first, skipping`); continue; }
-            commands.set(a, command);
+            if(!commands.has(a)) commands.set(a, command);
           }
         }
       }
@@ -132,23 +151,83 @@ app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')))
 app.listen(PORT,()=>console.log(`🌐 Server running on port ${PORT}`));
 setInterval(async()=>{ try{ const url=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`; await fetch(`${url}/ping`); }catch{} }, 4*60*1000);
 
-// ================= GROUP ADMIN CHECK - LID + PN =================
+// ================= FIXED GROUP ADMIN CHECK - LID + PN + FALLBACK =================
+// FIX: Old code trusted F.findParticipant only. If it returned null, botAdmin = false even when bot IS admin.
 async function getGroupPermissions(from, sender, senderPn){
   try{
     const metadata = await sock.groupMetadata(from);
     const participants = metadata.participants||[];
-    let participant=null, bot=null;
-    if(F.findParticipant){
-      participant = F.findParticipant(metadata, sender) || F.findParticipant(metadata, senderPn);
-      bot = F.findParticipant(metadata, sock.user?.id) || F.findParticipant(metadata, sock.user?.lid);
-    } else {
-      let sNums=getNums(sender, senderPn);
-      participant=participants.find(p=> sNums.includes(getNums(p.id)[0]) || sNums.includes(getNums(p.phoneNumber)[0]) || p.id===sender || p.phoneNumber===sender);
-      let bNums=getNums(sock.user?.id, sock.user?.lid);
-      bot=participants.find(p=> bNums.includes(getNums(p.id)[0]) || bNums.includes(getNums(p.phoneNumber)[0]));
-    }
-    return { isAdmin:['admin','superadmin'].includes(participant?.admin), isBotAdmin:['admin','superadmin'].includes(bot?.admin), metadata };
+    const sNums = getNums(sender, senderPn);
+    const bNums = getNums(sock?.user?.id, sock?.user?.lid, sock?.user?.pn);
+    // Manual find - no depend on F
+    const findByNums = (nums) => participants.find(p=>{
+      const pNums = getNums(p.id, p.phoneNumber, p.lid);
+      return nums.some(n=> pNums.includes(n)) || pNums.some(n=> nums.includes(n));
+    });
+    let participant = findByNums(sNums);
+    let bot = findByNums(bNums);
+    // Fallback: try F if manual failed
+    if(!participant && F.findParticipant) participant = F.findParticipant(metadata, sender) || F.findParticipant(metadata, senderPn);
+    if(!bot && F.findParticipant) bot = F.findParticipant(metadata, sock?.user?.id) || F.findParticipant(metadata, sock?.user?.lid);
+    const isAdmin = ['admin','superadmin'].includes(participant?.admin);
+    const isBotAdmin = ['admin','superadmin'].includes(bot?.admin);
+    return { isAdmin, isBotAdmin, metadata, participant, bot };
   }catch(e){ return {isAdmin:false,isBotAdmin:false,metadata:null}; }
+}
+
+// ================= BUILT-IN ANTILINK - DELETE + WARN 3 = KICK =================
+// FIX: This runs INSIDE index, no depend on plugin. So even if plugin fails, anti works.
+async function builtInAntiLink(sock, m, from, sender, senderPn, body, perms, isOwner){
+  if(!isOwner && perms.isAdmin) return false; // Admins exempt
+  const anti = db.anti?.[from];
+  if(!anti?.antilink) return false;
+  const linkRegex = /(https?:\/\/|www\.|chat\.whatsapp\.com\/|wa\.me\/|t\.me\/|telegram\.me\/|discord\.gg\/|instagram\.com\/|youtube\.com\/|youtu\.be\/)/i;
+  if(!linkRegex.test(body)) return false;
+  // 1. DELETE LINK FIRST - no be only warn
+  await sock.sendMessage(from, { delete: m.key }).catch(()=>{});
+  // 2. WARN COUNTER
+  if(!db.warns[from]) db.warns[from] = {};
+  const key = sender; // use full JID
+  db.warns[from][key] = (db.warns[from][key]||0) + 1;
+  const count = db.warns[from][key];
+  F.saveDB(db);
+  if(count >= 3){
+    // 3. KICK ON 3RD VIOLATION
+    delete db.warns[from][key];
+    F.saveDB(db);
+    await sock.sendMessage(from, { text: `🚫 @${getNums(sender)[0]} don reach 3 warnings for sending link. Kicking...`, mentions:[sender] }).catch(()=>{});
+    if(perms.isBotAdmin){
+      await sock.groupParticipantsUpdate(from, [sender], 'remove').catch(e=>console.log('Kick failed:', e.message));
+    } else {
+      await sock.sendMessage(from, { text: `❌ I no fit kick - make bot admin first, then I go kick am.` }).catch(()=>{});
+    }
+  } else {
+    await sock.sendMessage(from, { text: `⚠️ @${getNums(sender)[0]} No link allowed here!\nWarning ${count}/3 - Next na kick.\nLink deleted ✅`, mentions:[sender] }).catch(()=>{});
+  }
+  return true; // blocked
+}
+
+// ================= BUILT-IN AUTO - REAL, NO DEMO =================
+async function builtInAuto(sock, m, from, db){
+  const auto = db.auto || {};
+  try{
+    // Auto read
+    if(auto.autoread || auto.read) await sock.readMessages([m.key]).catch(()=>{});
+    // Auto status view is handled in status listener below
+  }catch{}
+}
+
+async function builtInAutoStatus(sock, message){
+  const auto = db.auto || {};
+  try{
+    if(auto.autoview || auto.autoviewstatus || auto.viewstatus){
+      await sock.readMessages([message.key]).catch(()=>{});
+    }
+    if(auto.autolike || auto.autolikestatus){
+      // Like status with ❤️ - real Baileys reaction
+      await sock.sendMessage('status@broadcast', { react: { text: '❤️', key: message.key } }).catch(()=>{});
+    }
+  }catch(e){ console.log('Auto status error:', e.message); }
 }
 
 // ================= WHATSAPP CONNECTION =================
@@ -165,7 +244,7 @@ async function start(){
       const { connection, lastDisconnect } = update;
       if(connection==='connecting') console.log('🔄 Connecting...');
       if(connection==='open'){
-        isStarting=false; console.log('✅ META AI MD CONNECTED');
+        isStarting=false; console.log('✅ META AI MD CONNECTED - Commands:', commands.size);
         for(let fn of getHandler('startAutoBio')){ try{ await fn(sock, db, config); }catch(e){ console.log('Auto bio error:', e.message); } }
       }
       if(connection==='close'){
@@ -176,12 +255,12 @@ async function start(){
         if(!reconnectTimer) reconnectTimer=setTimeout(()=>{ reconnectTimer=null; start(); },5000);
       }
     });
-    // ===== FIX 1 - AUTO STATUS =====
-    // Removed private check so autoview / autolike status works even in private mode
+    // AUTO STATUS - REAL
     sock.ev.on('messages.upsert', async ({messages})=>{
       for(let message of messages){
         try{
           if(message.key?.remoteJid!=='status@broadcast') continue;
+          await builtInAutoStatus(sock, message);
           for(let fn of getHandler('handleStatus')) await fn(sock, message, db, F, config);
         }catch(e){ console.log('Status handler error:', e.message); }
       }
@@ -189,8 +268,6 @@ async function start(){
     sock.ev.on('messages.update', async updates=>{
       try{ for(let fn of getHandler('handleDelete')) await fn(sock, updates, db, F, config); }catch(e){ console.log('Anti-delete error:', e.message); }
     });
-    // ===== FIX 2 - AUTO WELCOME / GOODBYE =====
-    // Removed private check so autowelcome / autogoodbye works
     sock.ev.on('group-participants.update', async update=>{
       try{
         for(let fn of getHandler('handleParticipantProtection')) await fn(sock, update, db, F, config);
@@ -222,9 +299,6 @@ async function start(){
           const senderPn=m.key.participantPn || m.key.remoteJidAlt || sender;
           const senderNums=getNums(sender, senderPn);
           const pushname=m.pushName||'User';
-          // ===== FIX 3 - ANTI + AUTO MAIN =====
-          // Changed: body can be '' for sticker/image/video, don't skip before Anti/Auto
-          // Removed early private check from here, moved to AFTER Anti/Auto
           const body=F.getText(m) || '';
           const isGroup=F.isGroup(from);
           let isOwner=isOwnerCheck(sender, senderPn, db);
@@ -237,11 +311,19 @@ async function start(){
           let permissions={isAdmin:false,isBotAdmin:false,metadata:null};
           if(isGroup) permissions=await getGroupPermissions(from, sender, senderPn);
           if(isOwner) permissions.isAdmin=true;
-          // ===== FIX 4 - ANTI + AUTO BLOCK =====
-          // Changed: blocked now really blocks message with blockedByAnti flag
-          // Before, continue was only for inner for() loop, so Anti never blocked command
+
+          // ===== BUILT-IN AUTO FIRST (real) =====
+          if(!m.key.fromMe) await builtInAuto(sock, m, from, db);
+
+          // ===== BUILT-IN ANTILINK - DELETE + WARN 3 = KICK =====
+          // Runs BEFORE plugin, so e must work even if plugin fails
           let blockedByAnti = false;
-          if(!m.key.fromMe){
+          if(!m.key.fromMe && isGroup && !isOwner){
+            blockedByAnti = await builtInAntiLink(sock, m, from, sender, senderPn, body, permissions, isOwner);
+            if(blockedByAnti){ F.saveDB(db); continue; }
+          }
+
+          if(!blockedByAnti && !m.key.fromMe){
             try{
               for(let fn of getHandler('handleMuted')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } }
               if(!blockedByAnti && !getHandler('handleMuted').length && isGroup && db.muted?.[from]?.length){
@@ -250,19 +332,13 @@ async function start(){
               }
             }catch(e){ console.log('Muted handler error:', e.message); }
             if(!blockedByAnti){
-              try{
-                for(let fn of getHandler('handleProtection')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } }
-              }catch(e){ console.log('Protection handler error:', e.message); }
+              try{ for(let fn of getHandler('handleProtection')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } } }catch(e){ console.log('Protection handler error:', e.message); }
             }
             if(!blockedByAnti){
-              try{
-                for(let fn of getHandler('handleAnti')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } }
-              }catch(e){ console.log('Anti handler error:', e.message); }
+              try{ for(let fn of getHandler('handleAnti')){ let blocked=await fn(sock, m, db, F, config); if(blocked){ F.saveDB(db); blockedByAnti = true; break; } } }catch(e){ console.log('Anti handler error:', e.message); }
             }
             if(!blockedByAnti){
-              try{
-                for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config);
-              }catch(e){ console.log('Auto handler error:', e.message); }
+              try{ for(let fn of getHandler('handleAuto')) await fn(sock, m, db, F, config); }catch(e){ console.log('Auto handler error:', e.message); }
             }
           }
           if(blockedByAnti) continue;
@@ -294,7 +370,9 @@ async function start(){
           if(plugin.ownerOnly && !isOwner){ await reply(config.messages?.ownerOnly || '❌ Owner only command.'); continue; }
           if(plugin.groupOnly && !isGroup){ await reply(config.messages?.groupOnly || '❌ Group only command.'); continue; }
           if(plugin.adminOnly && !permissions.isAdmin && !isOwner){ await reply('❌ Admins only.'); continue; }
-          await plugin.run(ctx);
+          // FIX: botAdminOnly check - now uses FIXED permissions, no go lie again
+          if((plugin.botAdminOnly || plugin.botAdmin) && !permissions.isBotAdmin){ await reply('❌ The bot must be an admin. Make bot admin first.'); continue; }
+          try{ await plugin.run(ctx); }catch(e){ console.log(`Cmd ${cmdName} error:`, e.message); await reply(`❌ Command error: ${e.message}`); }
           F.saveDB(db);
         }catch(e){ console.log('Message handler error:', e.message); }
       }
