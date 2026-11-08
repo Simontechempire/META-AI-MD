@@ -1,4 +1,5 @@
-// META AI MD - INDEX.JS - FIXED ALL - SIMON TECH INC
+// META AI MD - INDEX.JS - MATCHES CHANGED FUNCTION - SIMON TECH INC
+// lib/menu.js NOT TOUCHED - linking NOT TOUCHED
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const express = require('express');
 const path = require('path');
@@ -15,22 +16,27 @@ let sock = null;
 let db = F.loadDB() || {};
 let isStarting = false;
 let reconnectTimer = null;
+// CHANGED: loadDB already sets defaults, don't overwrite saved prefix/mode
 if (!db.settings) db.settings = {};
 if (!db.anti) db.anti = {};
 if (!db.group) db.group = {};
 if (!db.auto) db.auto = {};
 if (!db.warns) db.warns = {};
-function fancy(text){
-  const map={a:'𝐚',b:'𝐛',c:'𝐜',d:'𝐝',e:'𝐞',f:'𝐟',g:'𝐠',h:'𝐡',i:'𝐢',j:'𝐣',k:'𝐤',l:'𝐥',m:'𝐦',n:'𝐧',o:'𝐨',p:'𝐩',q:'𝐪',r:'𝐫',s:'𝐬',t:'𝐭',u:'𝐮',v:'𝐯',w:'𝐰',x:'𝐱',y:'𝐲',z:'𝐳',A:'𝐀',B:'𝐁',C:'𝐂',D:'𝐃',E:'𝐄',F:'𝐅',G:'𝐆',H:'𝐇',I:'𝐈',J:'𝐉',K:'𝐊',L:'𝐋',M:'𝐌',N:'𝐍',O:'𝐎',P:'𝐏',Q:'𝐐',R:'𝐑',S:'𝐒',T:'𝐓',U:'𝐔',V:'𝐕',W:'𝐖',X:'𝐗',Y:'𝐘',Z:'𝐙',0:'𝟎',1:'𝟏',2:'𝟐',3:'𝟑',4:'𝟒',5:'𝟓',6:'𝟔',7:'𝟕',8:'𝟖',9:'𝟗'};
-  return String(text).split('').map(c=>map[c]||c).join('');
-}
+// Use F.fancy from changed function, fallback if missing
+const fancy = F.fancy || F.bold || ((t)=>String(t));
 F.fancy = fancy; F.bold = fancy;
 function getNums(...jids){
+  // Use F.getNums from changed function
+  if(F.getNums) return F.getNums(...jids);
   let out=[];
   for(let j of jids){ let n=String(j||'').split('@')[0].split(':')[0].replace(/[^0-9]/g,''); if(n) out.push(n); }
   return [...new Set(out)];
 }
 function isOwnerCheck(sender, senderPn, database){
+  // CHANGED: Use F.isOwnerMessage / F.isOwner from changed function first
+  try{
+    if(F.isOwner && (F.isOwner(sender, database, senderPn) || F.isOwner(senderPn, database, sender))) return true;
+  }catch{}
   let nums = getNums(sender, senderPn);
   if(!nums.length) return false;
   let owners=[];
@@ -39,7 +45,6 @@ function isOwnerCheck(sender, senderPn, database){
   if(Array.isArray(database.owners)) database.owners.forEach(o=>owners.push(...getNums(o)));
   if(Array.isArray(config.owners)) config.owners.forEach(o=>owners.push(...getNums(o)));
   if(database.settings?.owner) owners.push(...getNums(database.settings.owner));
-  try{ if(F.isOwner && (F.isOwner(sender, database) || F.isOwner(senderPn, database))) return true; }catch{}
   return nums.some(n=>owners.includes(n));
 }
 function getMode(database){
@@ -236,6 +241,7 @@ async function start(){
         if(!handled){
           const from=update.id; const group=db.group?.[from]; if(!group) return;
           for(let participant of update.participants||[]){
+            // CHANGED: F.getPn now returns number only, so @${pn} works
             let pn = F.getPn ? F.getPn(participant) : participant.split('@')[0];
             try{ let md=await sock.groupMetadata(from); let p = F.findParticipant ? F.findParticipant(md, participant) : null; if(p?.phoneNumber) pn=getNums(p.phoneNumber)[0]; }catch{}
             if(update.action==='add' && (group.welcome || db.auto?.autowelcome)){
@@ -308,11 +314,13 @@ async function start(){
           const fancyReply=async (message, options={})=> reply(fancy(message), options);
           if(['menu','help','allmenu'].includes(cmdName)){
             try{
+              // MENU NOT TOUCHED - uses your lib/menu.js exactly
               const menuText=getMenu({ownerName:config.ownerAlias, prefix:usedPrefix, botUser:config.botName, hosting:config.hosting});
               return await sock.sendMessage(from,{image:{url:MENU_PFP}, caption:menuText},{quoted:m});
             }catch(e){ return reply('Menu error: '+e.message); }
           }
           if(cmdName==='reload' && isOwner){ loadPlugins(); return reply(`✅ ${fancy('Plugins reloaded')}\nCommands: ${commands.size}`); }
+          // CHANGED: ctx now uses F from changed function - includes getTarget, downloadMedia, etc
           const ctx={ sock, m, from, sender, senderNum:getNums(sender)[0], senderPn, senderNums, pushname, args, text, q:text, cmd:cmdName, cmdName, prefix:usedPrefix, isOwner, isGroup, isAdmin:permissions.isAdmin, isBotAdmin:permissions.isBotAdmin, metadata:permissions.metadata, db, config, F, reply, fancy, fancyReply };
           let handled=false;
           for(let plugin of functionPlugins){
